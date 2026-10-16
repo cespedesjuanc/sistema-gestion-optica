@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistema de Gestión Óptica</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+
+  <!-- Librerías -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+</head>
+<body>
+
+  <!-- ================================================================
+       PANTALLA DE INGRESO
+       ================================================================ -->
+  <div id="pantalla-login" class="login oculto">
+    <div class="login-marca">
+      <div class="login-logo">
+        <span class="marca-icono" id="login-icono"></span>
+        <img id="login-logo-img" class="oculto" alt="">
+        <span class="js-nombre-optica">Mi Óptica</span>
+      </div>
+      <div>
+        <h1>Gestión integral para tu <strong>óptica</strong></h1>
+        <p>Turnos, pacientes con historia clínica, profesionales, tarifas y reportes en un solo lugar.</p>
+        <div class="login-modulos">
+          <span>Turnos</span><span>Pacientes</span><span>Historia clínica</span>
+          <span>Profesionales</span><span>Tarifas</span><span>Reportes</span>
+        </div>
+      </div>
+      <small style="color:#7D8A96">Sistema de Gestión Óptica</small>
+    </div>
+
+    <div class="login-form-wrap">
+      <form id="form-login" class="login-form" autocomplete="on">
+        <h2>Iniciar sesión</h2>
+        <p class="sub">Ingresá con tu usuario para continuar.</p>
+        <div id="login-error" class="login-error oculto"></div>
+        <div class="campo">
+          <label for="login-email">Email</label>
+          <input type="email" id="login-email" required autocomplete="username" placeholder="usuario@optica.com">
+        </div>
+        <div class="campo">
+          <label for="login-password">Contraseña</label>
+          <input type="password" id="login-password" required autocomplete="current-password" placeholder="••••••••">
+        </div>
+        <button type="submit" class="btn" id="btn-login">Ingresar</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       APLICACIÓN
+       ================================================================ -->
+  <div id="app" class="app oculto">
+
+    <!-- Menú lateral -->
+    <aside class="sidebar">
+      <div class="sidebar-marca">
+        <span class="marca-icono" id="menu-icono"></span>
+        <img id="menu-logo-img" class="oculto" alt="">
+        <span class="js-nombre-optica">Mi Óptica</span>
+      </div>
+      <ul class="menu" id="menu"></ul>
+      <div class="sidebar-usuario">
+        <div class="avatar" id="menu-avatar"></div>
+        <div>
+          <div class="nombre" id="menu-usuario-nombre"></div>
+          <div class="rol" id="menu-usuario-rol"></div>
+        </div>
+      </div>
+    </aside>
+
+    <div class="principal">
+      <!-- Barra superior -->
+      <header class="topbar">
+        <button class="btn btn-icono btn-menu" id="btn-menu" title="Menú"></button>
+        <h1 id="titulo-vista">Inicio</h1>
+        <div class="espacio"></div>
+        <span class="fecha-hoy" id="fecha-hoy"></span>
+        <div class="usuario-menu">
+          <button class="usuario-btn" id="btn-usuario">
+            <span class="avatar" id="top-avatar" style="width:28px;height:28px;font-size:11px"></span>
+            <span class="nombre-top" id="top-usuario"></span>
+          </button>
+          <div class="desplegable oculto" id="menu-usuario">
+            <div class="info" id="menu-usuario-email"></div>
+            <button id="btn-mi-password"></button>
+            <button id="btn-logout"></button>
+          </div>
+        </div>
+      </header>
+
+      <main class="contenido">
+
+        <!-- ===================== INICIO ===================== -->
+        <section class="vista" id="vista-inicio">
+          <div class="banda">
+            <div>
+              <h2>Turnos de hoy <small id="inicio-hoy-total"></small></h2>
+              <div class="kpis" id="inicio-kpis"></div>
+            </div>
+            <div>
+              <h2>Resumen</h2>
+              <div class="resumen-lista" id="inicio-resumen"></div>
+            </div>
+          </div>
+
+          <div class="grilla g-2-1 mb">
+            <div class="tarjeta">
+              <div class="tarjeta-cab"><h3>Próximos turnos</h3><div class="espacio"></div>
+                <a href="#turnos" class="btn btn-sec btn-chico">Ver agenda</a></div>
+              <div class="tarjeta-cuerpo sin-padding tabla-wrap" id="inicio-proximos"></div>
+            </div>
+            <div class="tarjeta">
+              <div class="tarjeta-cab"><h3>Asistencia del mes</h3></div>
+              <div class="tarjeta-cuerpo">
+                <div class="grafico-anillo"><canvas id="graf-asistencia"></canvas><div class="centro" id="inicio-asistencia"></div></div>
+                <ul class="lista-datos" id="inicio-mes" style="margin-top:12px"></ul>
+              </div>
+            </div>
+          </div>
+
+          <div class="grilla g-2">
+            <div class="tarjeta">
+              <div class="tarjeta-cab"><h3>Prácticas más realizadas</h3><div class="espacio"></div><span class="c-suave">Este mes</span></div>
+              <div class="tarjeta-cuerpo sin-padding tabla-wrap" id="inicio-practicas"></div>
+            </div>
+            <div class="tarjeta" id="inicio-tarjeta-facturacion">
+              <div class="tarjeta-cab"><h3>Facturación</h3><div class="espacio"></div><span class="c-suave">Este mes</span></div>
+              <div class="tarjeta-cuerpo" id="inicio-facturacion"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===================== TURNOS ===================== -->
+        <section class="vista" id="vista-turnos">
+          <div class="barra">
+            <div class="campo">
+              <label>Fecha</label>
+              <div class="grupo-fecha">
+                <button class="btn btn-sec btn-chico" id="turnos-ant" title="Día anterior">‹</button>
+                <input type="date" id="turnos-fecha" style="width:160px">
+                <button class="btn btn-sec btn-chico" id="turnos-sig" title="Día siguiente">›</button>
+                <button class="btn btn-sec btn-chico" id="turnos-hoy">Hoy</button>
+              </div>
+            </div>
+            <div class="campo">
+              <label for="turnos-profesional">Profesional</label>
+              <select id="turnos-profesional" style="min-width:200px"></select>
+            </div>
+            <div class="espacio"></div>
+            <button class="btn" id="btn-nuevo-turno"></button>
+          </div>
+          <div class="chips" id="turnos-chips"></div>
+          <div class="tarjeta">
+            <div class="tarjeta-cab"><h3 id="turnos-titulo">Agenda</h3></div>
+            <div class="tarjeta-cuerpo sin-padding tabla-wrap" id="turnos-tabla"></div>
+          </div>
+        </section>
+
+        <!-- ===================== PACIENTES ===================== -->
+        <section class="vista" id="vista-pacientes">
+          <div class="barra">
+            <div class="buscador">
+              <span id="pacientes-icono-buscar"></span>
+              <input type="search" id="pacientes-buscar" placeholder="Buscar por apellido, nombre o DNI…">
+            </div>
+            <div class="espacio"></div>
+            <button class="btn" id="btn-nuevo-paciente"></button>
+          </div>
+          <div class="tarjeta">
+            <div class="tarjeta-cab"><h3>Pacientes</h3><div class="espacio"></div><span class="c-suave" id="pacientes-total"></span></div>
+            <div class="tarjeta-cuerpo sin-padding tabla-wrap" id="pacientes-tabla"></div>
+            <div class="paginacion" id="pacientes-paginacion"></div>
+          </div>
+        </section>
+
+        <!-- ===================== FICHA DE PACIENTE ===================== -->
+        <section class="vista" id="vista-paciente">
+          <div class="barra">
+            <a href="#pacientes" class="btn btn-sec btn-chico">‹ Volver a pacientes</a>
+          </div>
+          <div class="tarjeta">
+            <div class="tarjeta-cuerpo" id="ficha-cabecera"></div>
+            <div class="pestanas" id="ficha-pestanas"></div>
+            <div class="tarjeta-cuerpo" id="ficha-contenido"></div>
+          </div>
+        </section>
+
+        <!-- ===================== PROFESIONALES ===================== -->
+        <section class="vista" id="vista-profesionales">
+          <div class="barra">
+            <label class="check" style="margin:0"><input type="checkbox" id="prof-ver-inactivos"> Mostrar inactivos</label>
+            <div class="espacio"></div>
+            <button class="btn" id="btn-nuevo-profesional"></button>
+          </div>
+          <div class="prof-grid" id="profesionales-lista"></div>
+        </section>
+
+        <!-- ===================== PRÁCTICAS Y TARIFAS ===================== -->
+        <section class="vista" id="vista-practicas">
+          <div class="tarjeta">
+            <div class="tarjeta-cab"><h3>Prácticas</h3><div class="espacio"></div>
+              <button class="btn btn-chico" id="btn-nueva-practica"></button></div>
+            <div class="tarjeta-cuerpo sin-padding tabla-wrap" id="practicas-tabla"></div>
+          </div>
+          <div class="tarjeta">
+            <div class="tarjeta-cab"><h3>Tarifas e historial de precios</h3><div class="espacio"></div>
+              <select id="tarifas-filtro" style="width:auto;min-width:220px"></select>
+              <button class="btn btn-chico" id="btn-nueva-tarifa"></button></div>
+            <div class="tarjeta-cuerpo sin-padding tabla-wrap" id="tarifas-tabla"></div>
+          </div>
+        </section>
+
+        <!-- ===================== REPORTES ===================== -->
+        <section class="vista" id="vista-reportes">
+          <div class="barra">
+            <div class="campo"><label for="rep-periodo">Período</label>
+              <select id="rep-periodo">
+                <option value="mes">Este mes</option>
+                <option value="mes-ant">Mes anterior</option>
+                <option value="30">Últimos 30 días</option>
+                <option value="90">Últimos 90 días</option>
+                <option value="anio">Este año</option>
+                <option value="otro">Personalizado…</option>
+              </select></div>
+            <div class="campo"><label for="rep-desde">Desde</label><input type="date" id="rep-desde"></div>
+            <div class="campo"><label for="rep-hasta">Hasta</label><input type="date" id="rep-hasta"></div>
+            <div class="campo"><label for="rep-profesional">Profesional</label><select id="rep-profesional" style="min-width:200px"></select></div>
+            <button class="btn" id="btn-generar-reporte">Generar</button>
+            <div class="espacio"></div>
+            <button class="btn btn-sec" id="btn-imprimir-reporte"></button>
+          </div>
+          <div class="solo-imprimir" id="rep-encabezado-impresion"></div>
+          <div id="reporte-contenido"></div>
+        </section>
+
+        <!-- ===================== USUARIOS ===================== -->
+        <section class="vista" id="vista-usuarios">
+          <div class="barra">
+            <div class="espacio"></div>
+            <button class="btn" id="btn-nuevo-usuario"></button>
+          </div>
+          <div class="tarjeta">
+            <div class="tarjeta-cab"><h3>Usuarios del sistema</h3></div>
+            <div class="tarjeta-cuerpo sin-padding tabla-wrap" id="usuarios-tabla"></div>
+          </div>
+          <div class="nota">
+            <b>Roles:</b> <b>Administrador</b> accede a todo.
+            <b>Médico</b> ve la agenda, los pacientes y la historia clínica, y solo carga consultas propias (debe estar vinculado a un profesional).
+            <b>Recepción</b> gestiona turnos y pacientes, sin acceso a la historia clínica.
+          </div>
+        </section>
+
+        <!-- ===================== CONFIGURACIÓN ===================== -->
+        <section class="vista" id="vista-configuracion">
+          <div class="grilla g-2-1">
+            <div class="tarjeta">
+              <div class="tarjeta-cab"><h3>Datos de la óptica</h3></div>
+              <form class="tarjeta-cuerpo" id="form-config">
+                <div class="campo"><label>Nombre de la óptica <span class="req">*</span></label><input name="nombre_optica" required maxlength="60"></div>
+                <div class="fila-2">
+                  <div class="campo"><label>Razón social</label><input name="razon_social"></div>
+                  <div class="campo"><label>CUIT</label><input name="cuit"></div>
+                </div>
+                <div class="campo"><label>Dirección</label><input name="direccion"></div>
+                <div class="fila-2">
+                  <div class="campo"><label>Teléfono</label><input name="telefono"></div>
+                  <div class="campo"><label>Email</label><input name="email" type="email"></div>
+                </div>
+                <div class="campo"><label>URL del logo</label><input name="logo_url" type="url" placeholder="https://…/logo.png">
+                  <span class="ayuda">Imagen pública (PNG o JPG). Se muestra en el menú, el ingreso y las impresiones.</span></div>
+                <img id="config-logo-preview" class="logo-preview oculto" alt="Logo">
+                <div style="margin-top:16px"><button class="btn" type="submit">Guardar cambios</button></div>
+              </form>
+            </div>
+            <div class="tarjeta">
+              <div class="tarjeta-cab"><h3>Integración con WhatsApp</h3></div>
+              <div class="tarjeta-cuerpo">
+                <div class="nota">
+                  La base ya está preparada para recibir turnos desde <b>n8n + WhatsApp</b>:
+                  <ul style="padding-left:18px;margin:8px 0">
+                    <li><code>turnos_disponibles(profesional, fecha)</code> devuelve los horarios libres.</li>
+                    <li><code>solicitar_turno(...)</code> busca o crea al paciente y registra el turno como <i>pendiente</i> con origen <i>WhatsApp</i>.</li>
+                  </ul>
+                  Los turnos que llegan por WhatsApp se ven en la agenda con la etiqueta correspondiente para que Recepción los confirme.
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- Contenedores para ventanas y avisos -->
+  <div id="modales"></div>
+  <div class="avisos" id="avisos"></div>
+
+  <!-- Scripts del sistema (el orden importa) -->
+  <script src="conexion.js"></script>
+  <script src="reportes.js"></script>
+  <script src="logica.js"></script>
+</body>
+</html>
