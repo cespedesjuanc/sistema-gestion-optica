@@ -44,6 +44,9 @@ const BD = (() => {
   // Quita caracteres que rompen los filtros "or" de PostgREST
   const limpiarBusqueda = (t) => (t || '').replace(/[,()*%\\]/g, ' ').trim();
 
+  // Quita acentos y pasa a minúsculas (misma regla que la columna "busqueda" de la base)
+  const sinAcentos = (t) => (t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
   const fechaISO = (d) => {
     const z = (n) => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`;
@@ -167,17 +170,10 @@ const BD = (() => {
     let c = sb.from('pacientes').select('*', { count: 'exact' })
       .order('apellido').order('nombre')
       .range(pagina * porPagina, pagina * porPagina + porPagina - 1);
-    const t = limpiarBusqueda(texto);
-    if (t) {
-      // coincide por apellido, nombre o DNI; con dos palabras también "apellido nombre" o "nombre apellido"
-      const filtros = [`apellido.ilike.%${t}%`, `nombre.ilike.%${t}%`, `dni.ilike.%${t}%`];
-      const [p1, p2] = t.split(/\s+/);
-      if (p2) {
-        filtros.push(`and(apellido.ilike.%${p1}%,nombre.ilike.%${p2}%)`);
-        filtros.push(`and(nombre.ilike.%${p1}%,apellido.ilike.%${p2}%)`);
-      }
-      c = c.or(filtros.join(','));
-    }
+    // Se busca sin acentos ni mayúsculas: "nunez" encuentra "Núñez".
+    // Cada palabra escrita debe aparecer en el apellido, el nombre o el DNI.
+    const palabras = sinAcentos(limpiarBusqueda(texto)).split(/\s+/).filter(Boolean);
+    palabras.forEach((p) => { c = c.ilike('busqueda', `%${p}%`); });
     const { data, error, count } = await c;
     if (error) throw traducirError(error);
     return { filas: data, total: count };
@@ -185,7 +181,7 @@ const BD = (() => {
 
   const obtenerPaciente = (id) => q(sb.from('pacientes').select('*').eq('id', id).single());
 
-  const guardarPaciente = ({ id, created_at, telefono_normalizado, ...campos }) => {
+  const guardarPaciente = ({ id, created_at, telefono_normalizado, busqueda, ...campos }) => {
     for (const k in campos) if (campos[k] === '') campos[k] = null;
     return id
       ? q(sb.from('pacientes').update(campos).eq('id', id).select().single())
