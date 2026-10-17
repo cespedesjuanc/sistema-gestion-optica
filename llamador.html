@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Llamador de pacientes</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+</head>
+<body data-pagina="llamador" class="llamador">
+
+  <!-- Encabezado: óptica y reloj -->
+  <header class="ll-cab">
+    <div class="ll-marca">
+      <span class="marca-icono" id="ll-icono"></span>
+      <img id="ll-logo" class="oculto" alt="">
+      <span class="js-nombre-optica">Mi Óptica</span>
+    </div>
+    <div class="ll-reloj"><strong id="ll-hora"></strong><span id="ll-fecha"></span></div>
+  </header>
+
+  <main class="ll-cuerpo">
+    <!-- Llamado actual -->
+    <section class="ll-actual" id="ll-actual">
+      <div id="ll-vacio" class="ll-vacio">
+        <div class="ll-etiqueta">Sala de espera</div>
+        <p>Aguarde a ser llamado. Gracias.</p>
+      </div>
+      <div id="ll-contenido" class="oculto">
+        <div class="ll-etiqueta">Paciente</div>
+        <div class="ll-paciente" id="ll-paciente"></div>
+        <div class="ll-consultorio">
+          <span>Consultorio</span>
+          <strong id="ll-consultorio"></strong>
+        </div>
+        <div class="ll-profesional" id="ll-profesional"></div>
+      </div>
+    </section>
+
+    <!-- Últimos llamados -->
+    <aside class="ll-historial">
+      <h2>Últimos llamados</h2>
+      <ol id="ll-lista"><li class="ll-sin">Todavía no hay llamados.</li></ol>
+    </aside>
+  </main>
+
+  <div class="ll-franja"></div>
+
+  <!-- Controles (se ven tenues para no distraer) -->
+  <div class="ll-controles">
+    <button id="ll-sonido"></button>
+    <button id="ll-pantalla"></button>
+  </div>
+
+  <!-- Avisos: inicio de sesión, activar sonido, etc. -->
+  <div class="ll-overlay oculto" id="ll-overlay"></div>
+
+  <script src="conexion.js"></script>
+  <script src="reportes.js"></script>
+  <script src="logica.js"></script>
+</body>
+</html>

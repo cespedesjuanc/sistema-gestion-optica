@@ -84,6 +84,8 @@
         <h1 id="titulo-vista">Inicio</h1>
         <div class="espacio"></div>
         <span class="fecha-hoy" id="fecha-hoy"></span>
+        <button class="chip chip-consultorio oculto" id="chip-consultorio" title="Cambiar el consultorio de hoy"></button>
+        <button class="btn btn-sec btn-chico" id="btn-llamador" title="Abrir la pantalla del llamador en una ventana nueva"></button>
         <div class="usuario-menu">
           <button class="usuario-btn" id="btn-usuario">
             <span class="avatar" id="top-avatar" style="width:28px;height:28px;font-size:11px"></span>
@@ -104,7 +106,7 @@
           <div class="banda">
             <div>
               <h2>Turnos de hoy <small id="inicio-hoy-total"></small></h2>
-              <div class="kpis" id="inicio-kpis"></div>
+              <div class="kpis kpis-5" id="inicio-kpis"></div>
             </div>
             <div>
               <h2>Resumen</h2>
@@ -158,6 +160,7 @@
             <div class="espacio"></div>
             <button class="btn" id="btn-nuevo-turno"></button>
           </div>
+          <div id="turnos-espera"></div>
           <div class="chips" id="turnos-chips"></div>
           <div class="tarjeta">
             <div class="tarjeta-cab"><h3 id="turnos-titulo">Agenda</h3></div>

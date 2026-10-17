@@ -26,6 +26,7 @@ const ROLES = { admin: 'Administrador', medico: 'Médico', recepcion: 'Recepció
 const ESTADOS = {
   pendiente:  { texto: 'Pendiente',  color: 'var(--ambar)' },
   confirmado: { texto: 'Confirmado', color: 'var(--azul)' },
+  en_espera:  { texto: 'En espera',  color: 'var(--violeta)' },
   atendido:   { texto: 'Atendido',   color: 'var(--verde)' },
   ausente:    { texto: 'Ausente',    color: 'var(--rojo)' },
   cancelado:  { texto: 'Cancelado',  color: '#98A4AE' },
@@ -102,6 +103,12 @@ const ICONOS = {
   vacio: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
   dinero: '<path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
   historia: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>',
+  llamar: '<path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/>',
+  mudo: '<path d="M11 5 6 9H2v6h4l5 4z"/><path d="m23 9-6 6M17 9l6 6"/>',
+  pantalla: '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>',
+  llego: '<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/>',
+  expandir: '<path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/>',
+  puerta: '<path d="M3 21h18M6 21V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v17"/><circle cx="14.5" cy="12" r=".8"/>',
   anteojos: '<circle cx="6" cy="15" r="4"/><circle cx="18" cy="15" r="4"/><path d="M10 15h4M2 15l1.5-7.5A2 2 0 0 1 5.5 6H6M22 15l-1.5-7.5A2 2 0 0 0 18.5 6H18"/>',
 };
 const icono = (nombre, clase = '') =>
@@ -283,9 +290,10 @@ function confirmar(mensaje, { titulo = 'Confirmar', textoOk = 'Aceptar', peligro
 document.addEventListener('DOMContentLoaded', iniciar);
 
 async function iniciar() {
+  if (document.body.dataset.pagina === 'llamador') return iniciarLlamador();
   // leer colores de la paleta desde el CSS
   const css = getComputedStyle(document.documentElement);
-  ['azul', 'rojo', 'verde', 'ambar', 'texto-suave', 'borde'].forEach((c) => { COLOR[c] = css.getPropertyValue('--' + c).trim(); });
+  ['azul', 'rojo', 'verde', 'ambar', 'violeta', 'texto-suave', 'borde'].forEach((c) => { COLOR[c] = css.getPropertyValue('--' + c).trim(); });
   if (window.Chart) {
     Chart.defaults.font.family = "'Lato', 'Segoe UI', Arial, sans-serif";
     Chart.defaults.color = COLOR['texto-suave'];
@@ -318,6 +326,7 @@ function pintarIconosFijos() {
   $('#btn-nueva-tarifa').innerHTML = `${icono('mas')} Nueva tarifa`;
   $('#btn-nuevo-usuario').innerHTML = `${icono('mas')} Nuevo usuario`;
   $('#btn-imprimir-reporte').innerHTML = `${icono('imprimir')} Imprimir`;
+  $('#btn-llamador').innerHTML = `${icono('pantalla')} <span class="texto-llamador">Llamador</span>`;
   $('#btn-mi-password').innerHTML = `${icono('llave')} Cambiar mi contraseña`;
   $('#btn-logout').innerHTML = `${icono('salir')} Cerrar sesión`;
 }
@@ -374,6 +383,11 @@ async function entrar() {
 
   if (p.rol === 'medico' && !p.profesional_id) {
     aviso('Tu usuario de médico no está vinculado a un profesional. Pedile al administrador que lo vincule.', 'error');
+  }
+  pintarChipConsultorio();
+  // el primer ingreso del día, el médico confirma en qué consultorio atiende
+  if (p.rol === 'medico' && p.profesionales && p.profesionales.consultorio_fecha !== hoy()) {
+    setTimeout(() => modalConsultorio(), 400);
   }
   irA(location.hash || '#inicio');
 }
@@ -456,6 +470,17 @@ function enlazarEventos() {
   });
   $('#btn-nuevo-turno').addEventListener('click', () => modalTurno({ fecha: APP.turnos.fecha, profesional_id: APP.turnos.profesionalId }));
   $('#turnos-tabla').addEventListener('click', accionTurno);
+  $('#turnos-espera').addEventListener('click', accionTurno);
+  $('#btn-llamador').addEventListener('click', abrirLlamador);
+  $('#chip-consultorio').addEventListener('click', () => modalConsultorio());
+
+  // la agenda del día se refresca sola para ver a los pacientes que van llegando
+  setInterval(() => {
+    const enTurnos = location.hash.startsWith('#turnos') && APP.perfil;
+    if (enTurnos && APP.turnos.fecha === hoy() && !$('#modales').children.length && !document.hidden) {
+      cargarTurnos({ silencioso: true }).catch(() => {});
+    }
+  }, 20000);
 
   // pacientes
   $('#pacientes-buscar').addEventListener('input', debounce((e) => {
@@ -538,6 +563,7 @@ async function cargarInicio() {
   $('#inicio-kpis').innerHTML =
     kpi(r.hoy.pendiente, 'Pendientes', 'reloj', 'c-ambar', 'pendiente') +
     kpi(r.hoy.confirmado, 'Confirmados', 'checkCirculo', 'c-azul', 'confirmado') +
+    kpi(r.hoy.en_espera, 'En espera', 'usuarios', 'c-violeta', 'en_espera') +
     kpi(r.hoy.atendido, 'Atendidos', 'atender', 'c-verde', 'atendido') +
     kpi(r.hoy.ausente + r.hoy.cancelado, 'Ausentes / cancel.', 'ausente', 'c-rojo', 'ausente');
   $$('#inicio-kpis [data-ir-estado]').forEach((k) => k.addEventListener('click', () => {
@@ -606,12 +632,12 @@ function grafico(idCanvas, config) {
 // ---------------------------------------------------------------------
 // 7. TURNOS
 // ---------------------------------------------------------------------
-async function cargarTurnos() {
+async function cargarTurnos({ silencioso = false } = {}) {
   const f = APP.turnos;
   $('#turnos-fecha').value = f.fecha;
   $('#turnos-profesional').innerHTML = opcionesProfesionales(f.profesionalId, 'Todos los profesionales');
   $('#turnos-titulo').textContent = `Agenda del ${fmtFechaLarga(f.fecha)}`;
-  $('#turnos-tabla').innerHTML = cargando();
+  if (!silencioso) $('#turnos-tabla').innerHTML = cargando();
 
   const turnos = await BD.listarTurnos({ desde: f.fecha, hasta: f.fecha, profesionalId: f.profesionalId || null });
 
@@ -624,6 +650,7 @@ async function cargarTurnos() {
         <span class="punto" style="background:${v.color}"></span>${v.texto} <b>${cuenta[k] || 0}</b></button>`).join('');
 
   recordarTurnos(turnos);
+  pintarSalaDeEspera(f.fecha === hoy() ? turnos.filter((t) => t.estado === 'en_espera') : []);
   const lista = f.estado ? turnos.filter((t) => t.estado === f.estado) : turnos;
   $('#turnos-tabla').innerHTML = lista.length ? `
     <table class="tabla"><thead><tr>
@@ -632,9 +659,49 @@ async function cargarTurnos() {
     : vacio(f.estado ? `No hay turnos "${ESTADOS[f.estado].texto.toLowerCase()}" para este día.` : 'No hay turnos para este día.');
 }
 
+// Tarjeta "Sala de espera": pacientes que ya llegaron, por orden de llegada
+function pintarSalaDeEspera(enEspera) {
+  const cont = $('#turnos-espera');
+  if (!enEspera.length) { cont.innerHTML = ''; return; }
+  enEspera.sort((a, b) => (a.llegada_at || '').localeCompare(b.llegada_at || ''));
+  const minutos = (ts) => ts ? Math.max(0, Math.round((Date.now() - new Date(ts)) / 60000)) : null;
+  cont.innerHTML = `
+    <div class="tarjeta sala-espera">
+      <div class="tarjeta-cab"><h3>${icono('usuarios', 'icono-sm')} Sala de espera</h3>
+        <span class="badge badge-en_espera">${enEspera.length} paciente${enEspera.length > 1 ? 's' : ''}</span>
+        <div class="espacio"></div><span class="ayuda">Se actualiza sola cada 20 segundos</span></div>
+      <div class="tarjeta-cuerpo sin-padding tabla-wrap"><table class="tabla"><tbody>
+      ${enEspera.map((t) => {
+        const m = minutos(t.llegada_at);
+        return `<tr>
+          <td class="hora" style="width:90px">${fmtHora(t.hora)}<span class="sub">turno</span></td>
+          <td><b>${esc(t.paciente)}</b><span class="sub">${esc(t.practica)}</span></td>
+          <td class="nowrap"><span class="barra-color" style="background:${esc(t.profesional_color)}"></span>${esc(t.profesional)}</td>
+          <td class="nowrap c-suave">${m === null ? '' : `Espera hace ${m} min`}${t.llamado_at ? `<span class="sub c-violeta">Llamado ${new Date(t.llamado_at).toTimeString().slice(0, 5)}</span>` : ''}</td>
+          <td><div class="acciones">${puedeAtender(t) ? `
+            <button class="btn btn-chico btn-violeta" data-accion="llamar" data-id="${t.id}">${icono('llamar', 'icono-sm')} ${t.llamado_at ? 'Volver a llamar' : 'Llamar'}</button>
+            ${puedeVerHC() ? `<button class="btn btn-chico btn-verde" data-accion="atender" data-id="${t.id}">${icono('atender', 'icono-sm')} Atender</button>` : ''}` : ''}
+          </div></td></tr>`;
+      }).join('')}
+      </tbody></table></div>
+    </div>`;
+}
+
+// Llama al paciente; si el médico no definió consultorio, se lo pide primero
+async function llamarTurno(turno) {
+  try {
+    const ll = await BD.llamarPaciente(turno.id);
+    aviso(`Llamando a ${ll.paciente} — Consultorio ${ll.consultorio}`, 'info');
+  } catch (err) {
+    if (/consultorio/i.test(err.message) && rol() === 'medico') {
+      modalConsultorio(() => llamarTurno(turno).then(refrescarVistaActual));
+    } else throw err;
+  }
+}
+
 function filaTurno(t) {
   return `<tr>
-    <td class="hora">${fmtHora(t.hora)}<span class="sub">${t.duracion_min} min</span></td>
+    <td class="hora">${fmtHora(t.hora)}<span class="sub">${t.duracion_min} min</span>${infoEspera(t)}</td>
     <td><a href="#paciente/${t.paciente_id}">${esc(t.paciente)}</a>
         <span class="sub">DNI ${esc(t.paciente_dni)}${t.paciente_telefono ? ' · ' + esc(t.paciente_telefono) : ''}</span>
         ${t.origen === 'whatsapp' ? badgeWhatsapp() : ''}</td>
@@ -644,6 +711,13 @@ function filaTurno(t) {
     <td class="num">${dinero(t.precio)}</td>
     <td><div class="acciones">${botonesTurno(t)}</div></td>
   </tr>`;
+}
+
+// Hora de llegada y último llamado (para turnos en sala de espera)
+function infoEspera(t) {
+  if (t.estado !== 'en_espera') return '';
+  const hm = (ts) => new Date(ts).toTimeString().slice(0, 5);
+  return `<span class="sub c-violeta">${t.llegada_at ? 'Llegó ' + hm(t.llegada_at) : ''}${t.llamado_at ? ' · Llamado ' + hm(t.llamado_at) : ''}</span>`;
 }
 
 // Guarda los turnos que se están mostrando, para que los botones de acción los encuentren
@@ -660,7 +734,9 @@ function botonesTurno(t, { conFicha = true } = {}) {
     return conFicha ? b('ficha', 'ver', 'Ver ficha del paciente') : '';
   }
   if (t.estado === 'pendiente') h += b('confirmar', 'check', 'Confirmar');
-  if (['pendiente', 'confirmado'].includes(t.estado)) {
+  if (['pendiente', 'confirmado'].includes(t.estado) && t.fecha === hoy()) h += b('llego', 'llego', 'Llegó (pasa a la sala de espera)');
+  if (t.estado === 'en_espera' && puedeAtender(t)) h += b('llamar', 'llamar', t.llamado_at ? 'Volver a llamar' : 'Llamar al paciente', 'llamar');
+  if (['pendiente', 'confirmado', 'en_espera'].includes(t.estado)) {
     if (puedeVerHC() && puedeAtender(t)) h += b('atender', 'atender', 'Atender (registrar consulta)');
     else h += b('atendido', 'atender', 'Marcar como atendido');
     h += b('ausente', 'ausente', 'Marcar ausente');
@@ -683,6 +759,8 @@ async function accionTurno(e) {
   try {
     switch (accion) {
       case 'confirmar': await BD.cambiarEstadoTurno(id, 'confirmado'); aviso('Turno confirmado'); break;
+      case 'llego': await BD.marcarLlegada(id); aviso(`${turno.paciente} está en la sala de espera`); break;
+      case 'llamar': await llamarTurno(turno); break;
       case 'atendido':  await BD.cambiarEstadoTurno(id, 'atendido'); aviso('Turno marcado como atendido'); break;
       case 'reactivar': await BD.cambiarEstadoTurno(id, 'pendiente'); aviso('El turno volvió a pendiente'); break;
       case 'ausente':
@@ -1264,6 +1342,7 @@ function pintarProfesionales() {
         <div><h4>${esc(p.apellido)}, ${esc(p.nombre)}</h4><div class="esp">${esc(p.especialidad)}</div></div>
       </div>
       <div class="linea">${icono('etiqueta', 'icono-sm')} ${esc(p.matricula)}</div>
+      <div class="linea">${icono('puerta', 'icono-sm')} Consultorio ${esc(consultorioDe(p) || '—')}${p.consultorio_fecha === hoy() && p.consultorio_hoy && p.consultorio_hoy !== p.consultorio ? ' <span class="c-violeta">(hoy)</span>' : ''}</div>
       ${p.telefono ? `<div class="linea">${icono('telefono', 'icono-sm')} ${esc(p.telefono)}</div>` : ''}
       ${p.email ? `<div class="linea">${icono('mail', 'icono-sm')} ${esc(p.email)}</div>` : ''}
       <div class="dias">${[1, 2, 3, 4, 5, 6, 0].map((d) => `<span class="dia ${dias.has(d) ? 'on' : ''}" title="${DIAS[d]}">${DIAS[d][0]}</span>`).join('')}</div>
@@ -1304,6 +1383,7 @@ function modalProfesional(p = null) {
       <div class="fila-3">
         <div class="campo"><label>Teléfono</label><input name="telefono" value="${v('telefono')}"></div>
         <div class="campo"><label>Email</label><input type="email" name="email" value="${v('email')}"></div>
+        <div class="campo"><label>Consultorio habitual</label><input name="consultorio" value="${v('consultorio')}" placeholder="Ej.: 1, 2, Box 3"></div>
         <div class="campo"><label>Color en la agenda</label><input type="color" name="color" value="${v('color') || '#2196F3'}" style="height:38px;padding:3px"></div>
       </div>
       <label class="check"><input type="checkbox" name="activo" ${!p || p.activo ? 'checked' : ''}> Profesional activo (aparece en la agenda)</label>
@@ -1323,7 +1403,7 @@ function modalProfesional(p = null) {
       }));
       if (horarios.some((h) => h.hora_hasta <= h.hora_desde)) throw new Error('En cada horario, la hora "hasta" debe ser mayor que "desde".');
       const prof = { ...d, id: p?.id, duracion_turno: Number(d.duracion_turno) };
-      ['dni', 'telefono', 'email'].forEach((k) => { if (!prof[k]) prof[k] = null; });
+      ['dni', 'telefono', 'email', 'consultorio'].forEach((k) => { if (!prof[k]) prof[k] = null; });
       await BD.guardarProfesional(prof, horarios);
       aviso(p ? 'Profesional actualizado' : 'Profesional registrado');
       await cargarProfesionales();
@@ -1588,7 +1668,7 @@ function pintarReporte() {
     data: {
       labels: est.map((e) => ESTADOS[e].texto),
       datasets: [{ data: est.map((e) => r.porEstado[e]),
-        backgroundColor: est.map((e) => ({ pendiente: COLOR.ambar, confirmado: COLOR.azul, atendido: COLOR.verde, ausente: COLOR.rojo, cancelado: '#B8C2CC' }[e])),
+        backgroundColor: est.map((e) => ({ pendiente: COLOR.ambar, confirmado: COLOR.azul, en_espera: COLOR.violeta, atendido: COLOR.verde, ausente: COLOR.rojo, cancelado: '#B8C2CC' }[e])),
         borderWidth: 2, borderColor: '#fff' }],
     },
     options: { maintainAspectRatio: false, cutout: '62%', plugins: { legend: { position: 'bottom' } } },
@@ -1771,4 +1851,289 @@ async function guardarConfiguracion(e) {
     aplicarMarca();
     aviso('Configuración guardada');
   } catch (err) { avisoError(err); }
+}
+
+// ---------------------------------------------------------------------
+// 15. CONSULTORIO DEL DÍA
+// ---------------------------------------------------------------------
+// Consultorio en el que atiende hoy un profesional (el del día o el habitual)
+function consultorioDe(p) {
+  if (!p) return '';
+  return (p.consultorio_fecha === hoy() && p.consultorio_hoy) ? p.consultorio_hoy : (p.consultorio || '');
+}
+
+function pintarChipConsultorio() {
+  const chip = $('#chip-consultorio');
+  const p = APP.perfil;
+  const visible = p?.rol === 'medico' && p.profesional_id;
+  chip.classList.toggle('oculto', !visible);
+  if (visible) {
+    const c = p.profesionales?.consultorio_fecha === hoy() ? p.profesionales.consultorio_hoy : null;
+    chip.innerHTML = `${icono('puerta', 'icono-sm')} ${c ? 'Consultorio <b>' + esc(c) + '</b>' : 'Elegir consultorio'}`;
+  }
+}
+
+function modalConsultorio(despues) {
+  const pr = APP.perfil?.profesionales;
+  if (!pr) return aviso('Tu usuario no está vinculado a un profesional.', 'error');
+  abrirModal({
+    titulo: '¿En qué consultorio atendés hoy?', tam: 'chico', textoGuardar: 'Confirmar',
+    cuerpo: `
+      <p style="margin:0 0 14px;color:var(--texto-suave);line-height:1.5">Es el consultorio que se anuncia en la pantalla de la sala cuando llamás a un paciente.</p>
+      <div class="campo"><label>Consultorio <span class="req">*</span></label>
+        <input name="consultorio" required maxlength="20" value="${esc(consultorioDe(pr))}" placeholder="Ej.: 2" style="font-size:20px;font-weight:700"></div>`,
+    onGuardar: async (d) => {
+      await BD.definirConsultorio(d.consultorio);
+      APP.perfil = await BD.perfilActual();
+      pintarChipConsultorio();
+      aviso(`Hoy atendés en el consultorio ${d.consultorio}`);
+      if (despues) setTimeout(despues, 50);
+    },
+  });
+}
+
+function abrirLlamador() {
+  const w = window.open('llamador.html', 'llamador', 'width=1280,height=760');
+  if (!w) aviso('El navegador bloqueó la ventana. Permití ventanas emergentes para este sitio.', 'error');
+  else w.focus();
+}
+
+// ---------------------------------------------------------------------
+// 16. PANTALLA DEL LLAMADOR (llamador.html)
+//     Muestra el último paciente llamado y lo anuncia con un aviso
+//     sonoro y voz. Recibe los llamados en tiempo real.
+// ---------------------------------------------------------------------
+const LLAMADOR = {
+  ultimoId: 0,
+  vistos: new Set(),
+  cola: [],
+  ocupado: false,
+  historial: [],
+  sonido: false,       // esta pantalla habla o solo muestra
+  audio: null,         // AudioContext para el aviso sonoro
+  voz: null,
+  REPETICIONES: 2,     // cuántas veces se anuncia cada llamado
+};
+
+function leerPreferencia(clave) { try { return localStorage.getItem(clave); } catch { return null; } }
+function guardarPreferencia(clave, valor) { try { localStorage.setItem(clave, valor); } catch { /* sin almacenamiento */ } }
+
+async function iniciarLlamador() {
+  $('#ll-sonido').addEventListener('click', () => alternarSonido());
+  $('#ll-pantalla').addEventListener('click', () => {
+    if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen?.();
+  });
+  $('#ll-pantalla').innerHTML = `${icono('expandir')} Pantalla completa`;
+  actualizarReloj(); setInterval(actualizarReloj, 1000);
+
+  APP.config = await BD.obtenerConfiguracion();
+  aplicarMarcaLlamador();
+
+  const sesion = await BD.sesionActual();
+  if (!sesion) {
+    return mostrarAvisoLlamador(`
+      <h2>Iniciá sesión primero</h2>
+      <p>Para usar el llamador, ingresá al sistema en esta computadora y volvé a abrir esta pantalla.</p>
+      <a class="btn" href="index.html">Ir al sistema</a>`);
+  }
+
+  // voces disponibles (se cargan de forma asíncrona en algunos navegadores)
+  if ('speechSynthesis' in window) {
+    elegirVoz();
+    speechSynthesis.onvoiceschanged = elegirVoz;
+  }
+
+  // ¿esta pantalla habla? (se pregunta la primera vez y se recuerda)
+  const pref = leerPreferencia('llamador-sonido');
+  if (pref === null) {
+    mostrarAvisoLlamador(`
+      <h2>¿Cómo se va a usar esta pantalla?</h2>
+      <p>Elegí “Con voz” en la TV de la sala de espera. En las computadoras de recepción y consultorios conviene “Solo mostrar”.</p>
+      <div class="ll-opciones">
+        <button class="btn" data-sonido="si">${icono('llamar')} Con voz (sala de espera)</button>
+        <button class="btn btn-sec" data-sonido="no">${icono('mudo')} Solo mostrar</button>
+      </div>`);
+    $('#ll-overlay').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-sonido]');
+      if (!b) return;
+      guardarPreferencia('llamador-sonido', b.dataset.sonido);
+      configurarSonido(b.dataset.sonido === 'si');
+      ocultarAvisoLlamador();
+    });
+  } else if (pref === 'si') {
+    // los navegadores exigen un toque antes de reproducir sonido
+    mostrarAvisoLlamador(`<h2>${icono('llamar')} Tocá la pantalla para activar el sonido</h2>
+      <p>Es un requisito del navegador. Solo hace falta una vez cada vez que se abre el llamador.</p>`, true);
+    $('#ll-overlay').addEventListener('click', () => { configurarSonido(true); ocultarAvisoLlamador(); }, { once: true });
+  } else {
+    configurarSonido(false);
+  }
+
+  // pantalla siempre encendida (si el navegador lo permite)
+  try { await navigator.wakeLock?.request('screen'); } catch { /* opcional */ }
+
+  // llamados anteriores de hoy (se muestran sin anunciarlos)
+  try {
+    const previos = await BD.llamadosDeHoy({ limite: 7 });
+    previos.reverse().forEach((ll) => { LLAMADOR.vistos.add(ll.id); LLAMADOR.ultimoId = Math.max(LLAMADOR.ultimoId, ll.id); mostrarLlamado(ll, false); });
+  } catch (e) { console.error(e); }
+
+  // tiempo real + consulta periódica como respaldo
+  try {
+    supabaseClient.realtime.setAuth(sesion.access_token);
+    BD.escucharLlamados(recibirLlamado);
+  } catch (e) { console.warn('Realtime no disponible', e); }
+  setInterval(buscarLlamadosNuevos, 4000);
+}
+
+function aplicarMarcaLlamador() {
+  const nombre = APP.config?.nombre_optica || 'Mi Óptica';
+  $$('.js-nombre-optica').forEach((el) => { el.textContent = nombre; });
+  document.title = `Llamador · ${nombre}`;
+  const logo = APP.config?.logo_url;
+  $('#ll-logo').classList.toggle('oculto', !logo);
+  $('#ll-icono').classList.toggle('oculto', !!logo);
+  if (logo) $('#ll-logo').src = logo;
+}
+
+function actualizarReloj() {
+  const ahora = new Date();
+  $('#ll-hora').textContent = ahora.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const f = ahora.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
+  $('#ll-fecha').textContent = f[0].toUpperCase() + f.slice(1);
+}
+
+function mostrarAvisoLlamador(html, clicEnTodo = false) {
+  const o = $('#ll-overlay');
+  o.innerHTML = `<div class="ll-aviso">${html}</div>`;
+  o.classList.remove('oculto');
+  o.classList.toggle('clic', clicEnTodo);
+}
+function ocultarAvisoLlamador() { $('#ll-overlay').classList.add('oculto'); }
+
+function configurarSonido(activo) {
+  LLAMADOR.sonido = activo;
+  if (activo) {
+    try {
+      LLAMADOR.audio ||= new (window.AudioContext || window.webkitAudioContext)();
+      LLAMADOR.audio.resume();
+      // "desbloquea" la voz en navegadores que lo requieren
+      if ('speechSynthesis' in window) speechSynthesis.speak(new SpeechSynthesisUtterance(''));
+    } catch { /* sin audio */ }
+  }
+  $('#ll-sonido').innerHTML = activo ? `${icono('llamar')} Sonido activado` : `${icono('mudo')} Sin sonido`;
+  $('#ll-sonido').classList.toggle('apagado', !activo);
+}
+
+function alternarSonido() {
+  const activo = !LLAMADOR.sonido;
+  guardarPreferencia('llamador-sonido', activo ? 'si' : 'no');
+  configurarSonido(activo);
+  if (activo) anunciar({ paciente: 'Prueba de sonido', consultorio: '1' }, 1);
+}
+
+function elegirVoz() {
+  const voces = speechSynthesis.getVoices().filter((v) => v.lang?.toLowerCase().startsWith('es'));
+  const preferidas = ['es-ar', 'es-419', 'es-us', 'es-mx', 'es-es'];
+  voces.sort((a, b) => {
+    const ia = preferidas.indexOf(a.lang.toLowerCase()), ib = preferidas.indexOf(b.lang.toLowerCase());
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || (b.localService === false) - (a.localService === false);
+  });
+  LLAMADOR.voz = voces[0] || null;
+}
+
+function recibirLlamado(ll) {
+  if (!ll || LLAMADOR.vistos.has(ll.id)) return;
+  // solo llamados de hoy
+  if (new Date(ll.created_at).toDateString() !== new Date().toDateString()) return;
+  LLAMADOR.vistos.add(ll.id);
+  LLAMADOR.ultimoId = Math.max(LLAMADOR.ultimoId, ll.id);
+  LLAMADOR.cola.push(ll);
+  procesarCola();
+}
+
+async function buscarLlamadosNuevos() {
+  try {
+    const nuevos = await BD.llamadosDeHoy({ desdeId: LLAMADOR.ultimoId, limite: 20 });
+    nuevos.reverse().forEach(recibirLlamado);
+  } catch { /* se reintenta en el próximo ciclo */ }
+}
+
+// Muestra y anuncia los llamados de a uno, en orden
+async function procesarCola() {
+  if (LLAMADOR.ocupado) return;
+  const ll = LLAMADOR.cola.shift();
+  if (!ll) return;
+  LLAMADOR.ocupado = true;
+  mostrarLlamado(ll, true);
+  const inicio = Date.now();
+  if (LLAMADOR.sonido) {
+    await sonarAviso();
+    await anunciar(ll, LLAMADOR.REPETICIONES);
+  }
+  // cada llamado queda en pantalla al menos 6 segundos antes del siguiente
+  await new Promise((r) => setTimeout(r, Math.max(0, 6000 - (Date.now() - inicio))));
+  LLAMADOR.ocupado = false;
+  procesarCola();
+}
+
+function mostrarLlamado(ll, destacar) {
+  LLAMADOR.historial.unshift(ll);
+  LLAMADOR.historial = LLAMADOR.historial.slice(0, 7);
+
+  $('#ll-vacio').classList.add('oculto');
+  $('#ll-contenido').classList.remove('oculto');
+  $('#ll-paciente').textContent = ll.paciente;
+  $('#ll-consultorio').textContent = ll.consultorio;
+  $('#ll-profesional').textContent = ll.profesional ? `Profesional: ${ll.profesional}` : '';
+
+  const hm = (ts) => new Date(ts).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const anteriores = LLAMADOR.historial.slice(1);
+  $('#ll-lista').innerHTML = anteriores.length
+    ? anteriores.map((x) => `<li><div><b>${esc(x.paciente)}</b><span>${hm(x.created_at)}</span></div><em>Cons. ${esc(x.consultorio)}</em></li>`).join('')
+    : '<li class="ll-sin">Todavía no hay otros llamados.</li>';
+
+  if (destacar) {
+    const caja = $('#ll-actual');
+    caja.classList.remove('ll-nuevo'); void caja.offsetWidth; caja.classList.add('ll-nuevo');
+  }
+}
+
+// Aviso sonoro "ding-dong" generado con Web Audio (no necesita archivos)
+function sonarAviso() {
+  return new Promise((resolver) => {
+    const ctx = LLAMADOR.audio;
+    if (!ctx) return resolver();
+    const tono = (frecuencia, comienzo, duracion) => {
+      const osc = ctx.createOscillator(), gan = ctx.createGain();
+      osc.type = 'sine'; osc.frequency.value = frecuencia;
+      gan.gain.setValueAtTime(0.0001, ctx.currentTime + comienzo);
+      gan.gain.exponentialRampToValueAtTime(0.5, ctx.currentTime + comienzo + 0.02);
+      gan.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + comienzo + duracion);
+      osc.connect(gan).connect(ctx.destination);
+      osc.start(ctx.currentTime + comienzo); osc.stop(ctx.currentTime + comienzo + duracion);
+    };
+    tono(659.25, 0, 0.9);    // Mi
+    tono(523.25, 0.45, 1.2); // Do
+    setTimeout(resolver, 1500);
+  });
+}
+
+// Anuncia por voz: "Juan Pérez. Consultorio 2."
+function anunciar(ll, veces = 1) {
+  return new Promise((resolver) => {
+    if (!('speechSynthesis' in window)) return resolver();
+    speechSynthesis.cancel();
+    let pendientes = veces;
+    const fin = () => { if (--pendientes <= 0) resolver(); };
+    for (let i = 0; i < veces; i++) {
+      const u = new SpeechSynthesisUtterance(`${ll.paciente}. Consultorio ${ll.consultorio}.`);
+      u.lang = LLAMADOR.voz?.lang || 'es-AR';
+      if (LLAMADOR.voz) u.voice = LLAMADOR.voz;
+      u.rate = 0.9;
+      u.onend = fin; u.onerror = fin;
+      speechSynthesis.speak(u);
+    }
+    setTimeout(resolver, 15000); // por si el navegador no avisa el final
+  });
 }

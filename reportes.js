@@ -70,7 +70,7 @@ const BD = (() => {
     const sesion = await sesionActual();
     if (!sesion) return null;
     return q(sb.from('perfiles')
-      .select('*, profesionales(id, nombre, apellido, especialidad)')
+      .select('*, profesionales(id, nombre, apellido, especialidad, consultorio, consultorio_hoy, consultorio_fecha)')
       .eq('id', sesion.user.id).maybeSingle());
   }
 
@@ -255,6 +255,35 @@ const BD = (() => {
   const eliminarTurno = (id) => q(sb.from('turnos').delete().eq('id', id));
 
   // ================================================================
+  //  SALA DE ESPERA Y LLAMADOR
+  // ================================================================
+  // Recepción registra que el paciente llegó
+  const marcarLlegada = (id) =>
+    q(sb.from('turnos').update({ estado: 'en_espera', llegada_at: new Date().toISOString() }).eq('id', id).select().single());
+
+  // Llama al paciente (lo muestra y anuncia la pantalla del llamador)
+  const llamarPaciente = (turnoId) => q(sb.rpc('llamar_paciente', { p_turno: turnoId }));
+
+  // El médico define en qué consultorio atiende hoy
+  const definirConsultorio = (consultorio) => q(sb.rpc('definir_consultorio', { p_consultorio: consultorio }));
+
+  // Llamados de hoy (los más recientes primero); con desdeId trae solo los nuevos
+  function llamadosDeHoy({ desdeId = 0, limite = 8 } = {}) {
+    const inicio = new Date(); inicio.setHours(0, 0, 0, 0);
+    let c = sb.from('llamados').select('*').gte('created_at', inicio.toISOString())
+      .order('id', { ascending: false }).limit(limite);
+    if (desdeId) c = c.gt('id', desdeId);
+    return q(c);
+  }
+
+  // Suscripción en tiempo real a nuevos llamados (Supabase Realtime)
+  function escucharLlamados(alLlegar) {
+    return sb.channel('llamados-sala')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'llamados' }, (p) => alLlegar(p.new))
+      .subscribe();
+  }
+
+  // ================================================================
   //  REPORTES Y TABLERO
   // ================================================================
 
@@ -292,12 +321,13 @@ const BD = (() => {
         total: turnosHoy.length,
         pendiente: porEstadoHoy.pendiente || 0,
         confirmado: porEstadoHoy.confirmado || 0,
+        en_espera: porEstadoHoy.en_espera || 0,
         atendido: porEstadoHoy.atendido || 0,
         cancelado: porEstadoHoy.cancelado || 0,
         ausente: porEstadoHoy.ausente || 0,
       },
       proximos: proximos
-        .filter((t) => ['pendiente', 'confirmado'].includes(t.estado))
+        .filter((t) => ['pendiente', 'confirmado', 'en_espera'].includes(t.estado))
         .filter((t) => t.fecha > hoyISO || t.hora.slice(0, 5) >= horaAhora)
         .slice(0, 8),
       semana: proximos.filter((t) => t.estado !== 'cancelado').length,
@@ -367,7 +397,7 @@ const BD = (() => {
         atendidos: atendidos.length,
         ausentes,
         cancelados: porEstado.cancelado || 0,
-        pendientes: (porEstado.pendiente || 0) + (porEstado.confirmado || 0),
+        pendientes: (porEstado.pendiente || 0) + (porEstado.confirmado || 0) + (porEstado.en_espera || 0),
         facturacion,
         ticketPromedio: atendidos.length ? facturacion / atendidos.length : 0,
         ausentismo: atendidos.length + ausentes ? (ausentes / (atendidos.length + ausentes)) * 100 : 0,
@@ -415,6 +445,7 @@ const BD = (() => {
     buscarPacientes, obtenerPaciente, guardarPaciente, eliminarPaciente,
     listarConsultas, guardarConsulta,
     listarTurnos, turnosDePaciente, turnosDisponibles, guardarTurno, cambiarEstadoTurno, eliminarTurno,
+    marcarLlegada, llamarPaciente, definirConsultorio, llamadosDeHoy, escucharLlamados,
     resumenInicio, reporteGeneral,
   };
 })();

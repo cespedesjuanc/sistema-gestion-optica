@@ -17,7 +17,9 @@ Proyecto profesionalizante — Ciencia de Datos, ISFT N° 244 Marcos Paz.
 | `conexion.js` | Conexión a Supabase |
 | `reportes.js` | Todas las consultas a la base de datos |
 | `logica.js` | Lógica de la interfaz, permisos y formularios |
+| `llamador.html` | Pantalla de la sala de espera que llama a los pacientes (pantalla + voz) |
 | `database.sql` | Script de la base de datos (no se publica en este repositorio) |
+| `llamador.sql` | Actualización de la base para el llamador (no se publica en este repositorio) |
 
 ## Puesta en marcha
 1. En Supabase: **SQL Editor → New query**, pegar `database.sql` y ejecutar.
@@ -28,6 +30,13 @@ Proyecto profesionalizante — Ciencia de Datos, ISFT N° 244 Marcos Paz.
 - **Administrador:** acceso total.
 - **Médico:** agenda, pacientes e historia clínica (edita solo sus consultas).
 - **Recepción:** turnos y pacientes, sin historia clínica.
+
+## Llamador de pacientes
+1. Recepción marca **Llegó** y el paciente pasa a la **sala de espera**.
+2. El médico (que al ingresar elige su consultorio del día) toca **Llamar**.
+3. La pantalla `llamador.html` (botón **Llamador** del sistema) muestra el nombre y el consultorio y lo anuncia por voz.
+
+Cada ventana del llamador puede estar **con voz** (TV de la sala) o **solo mostrar** (PCs de recepción y consultorios).
 
 ## Integración con WhatsApp (n8n)
 La base incluye `turnos_disponibles(profesional, fecha)` y `solicitar_turno(...)` para recibir pedidos de turno desde un flujo de n8n.
