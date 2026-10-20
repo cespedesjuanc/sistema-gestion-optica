@@ -46,5 +46,12 @@ Cada ventana del llamador puede estar **con voz** (TV de la sala) o **solo mostr
 - **Auditoría** inmutable: quién crea, modifica, elimina, consulta, imprime o exporta información y cuándo
   (pantalla *Auditoría* y pestaña *Registro de accesos* en la ficha del paciente, solo administradores).
 
+## Marco legal (Argentina)
+- **Ley 26.529 / Ley 27.706:** historia clínica inalterable (las consultas se corrigen solo dentro de las 24 h;
+  después, únicamente con enmiendas firmadas), nada se borra y los pacientes se dan de **baja lógica**;
+  copia completa de la historia clínica para entregar al paciente.
+- **Ley 25.326:** registro del consentimiento del paciente con formulario imprimible (incluye el texto
+  obligatorio de la AAIP) y compromiso de confidencialidad que acepta cada usuario.
+
 ## Integración con WhatsApp (n8n)
 La base incluye `turnos_disponibles(profesional, fecha)` y `solicitar_turno(...)` para recibir pedidos de turno desde un flujo de n8n.

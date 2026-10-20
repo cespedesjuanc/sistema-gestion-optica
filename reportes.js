@@ -169,7 +169,7 @@ const BD = (() => {
   // ================================================================
   //  PACIENTES
   // ================================================================
-  async function buscarPacientes(texto = '', { pagina = 0, porPagina = 25 } = {}) {
+  async function buscarPacientes(texto = '', { pagina = 0, porPagina = 25, incluirBajas = false } = {}) {
     let c = sb.from('pacientes').select('*', { count: 'exact' })
       .order('apellido').order('nombre')
       .range(pagina * porPagina, pagina * porPagina + porPagina - 1);
@@ -177,6 +177,7 @@ const BD = (() => {
     // Cada palabra escrita debe aparecer en el apellido, el nombre o el DNI.
     const palabras = sinAcentos(limpiarBusqueda(texto)).split(/\s+/).filter(Boolean);
     palabras.forEach((p) => { c = c.ilike('busqueda', `%${p}%`); });
+    if (!incluirBajas) c = c.eq('activo', true);
     const { data, error, count } = await c;
     if (error) throw traducirError(error);
     return { filas: data, total: count };
@@ -184,7 +185,8 @@ const BD = (() => {
 
   const obtenerPaciente = (id) => q(sb.from('pacientes').select('*').eq('id', id).single());
 
-  const guardarPaciente = ({ id, created_at, telefono_normalizado, busqueda, ...campos }) => {
+  const guardarPaciente = ({ id, created_at, telefono_normalizado, busqueda, activo, fecha_baja, motivo_baja,
+    consentimiento_datos, consentimiento_fecha, consentimiento_registrado_por, ...campos }) => {
     for (const k in campos) if (campos[k] === '') campos[k] = null;
     return id
       ? q(sb.from('pacientes').update(campos).eq('id', id).select().single())
@@ -193,17 +195,32 @@ const BD = (() => {
 
   const eliminarPaciente = (id) => q(sb.from('pacientes').delete().eq('id', id));
 
+  // Baja lógica (la historia clínica se conserva) y reactivación — solo administradores
+  const darDeBajaPaciente = (id, motivo) => q(sb.rpc('baja_paciente', { p_paciente: id, p_motivo: motivo }));
+  const reactivarPaciente = (id) => q(sb.rpc('reactivar_paciente', { p_paciente: id }));
+
+  // Consentimiento firmado por el paciente (fecha y usuario los registra el servidor)
+  const registrarConsentimiento = (id, otorgado) =>
+    q(sb.rpc('registrar_consentimiento', { p_paciente: id, p_otorgado: otorgado }));
+
+  // Compromiso de confidencialidad del usuario logueado
+  const aceptarConfidencialidad = () => q(sb.rpc('aceptar_confidencialidad'));
+
   // ================================================================
   //  HISTORIA CLÍNICA
   // ================================================================
   const listarConsultas = (pacienteId) =>
     q(sb.from('consultas')
-      .select('*, recetas(*), profesionales(nombre, apellido, especialidad, matricula)')
+      .select('*, recetas(*), enmiendas_hc(*), profesionales(nombre, apellido, especialidad, matricula)')
       .eq('paciente_id', pacienteId)
       .order('fecha', { ascending: false }));
 
+  // Enmienda: corrección posterior de una consulta (no reemplaza lo original)
+  const agregarEnmienda = (consultaId, texto, profesionalId = null) =>
+    q(sb.from('enmiendas_hc').insert({ consulta_id: consultaId, texto, profesional_id: profesionalId }).select().single());
+
   async function guardarConsulta(consulta, receta) {
-    const { id, recetas, profesionales, created_at, ...campos } = consulta;
+    const { id, recetas, profesionales, enmiendas_hc, created_at, creado_por, ...campos } = consulta;
     for (const k in campos) if (campos[k] === '') campos[k] = null;
     const guardada = id
       ? await q(sb.from('consultas').update(campos).eq('id', id).select().single())
@@ -467,7 +484,8 @@ const BD = (() => {
     listarProfesionales, guardarProfesional,
     listarPracticas, guardarPractica, listarTarifas, agregarTarifa, eliminarTarifa, precioVigente,
     buscarPacientes, obtenerPaciente, guardarPaciente, eliminarPaciente,
-    listarConsultas, guardarConsulta,
+    darDeBajaPaciente, reactivarPaciente, registrarConsentimiento, aceptarConfidencialidad,
+    listarConsultas, guardarConsulta, agregarEnmienda,
     listarTurnos, turnosDePaciente, turnosDisponibles, guardarTurno, cambiarEstadoTurno, eliminarTurno,
     marcarLlegada, llamarPaciente, definirConsultorio, llamadosDeHoy, escucharLlamados,
     resumenInicio, reporteGeneral,

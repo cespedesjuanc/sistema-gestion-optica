@@ -658,3 +658,23 @@ body.llamador {
 .aviso-inactividad .icono { color: var(--ambar); }
 .tabla-auditoria td { vertical-align: top; }
 .tabla-auditoria .detalle-aud { font-size: 12.5px; line-height: 1.5; max-width: 420px; word-break: break-word; }
+
+/* =====================================================================
+   MARCO LEGAL
+   ===================================================================== */
+.ficha-legal { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
+.legal-item {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  border-radius: var(--radio); padding: 8px 12px; font-size: 13px; border: 1px solid;
+}
+.legal-item > span { flex: 1; min-width: 220px; }
+.legal-item.ok        { background: var(--verde-claro); border-color: #BCE8DD; color: #136E5A; }
+.legal-item.pendiente { background: var(--ambar-claro); border-color: #F7DDB0; color: #8A5A0B; }
+.legal-item.baja      { background: var(--gris-claro);  border-color: var(--borde); color: var(--texto); }
+.legal-acciones { display: flex; justify-content: flex-end; }
+.peligro-texto { color: var(--rojo); }
+.peligro-texto:hover { color: #C43C32; }
+.enmienda { margin-top: 10px; background: var(--ambar-claro); border-left: 3px solid var(--ambar); border-radius: 4px; padding: 8px 12px; font-size: 13.5px; }
+.enmienda-cab { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #8A5A0B; margin-bottom: 2px; }
+.lista-legal { margin: 0; padding-left: 20px; line-height: 1.6; }
+.lista-legal li { margin-bottom: 6px; }

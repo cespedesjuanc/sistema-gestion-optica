@@ -16,7 +16,7 @@ const APP = {
   tarifas: [],
   graficos: {},          // instancias de Chart.js
   turnos: { fecha: null, profesionalId: '', estado: '' },
-  pacientes: { texto: '', pagina: 0, porPagina: 25 },
+  pacientes: { texto: '', pagina: 0, porPagina: 25, incluirBajas: false },
   ficha: { paciente: null, pestana: null },
   turnosVisibles: new Map(),
 };
@@ -33,6 +33,7 @@ const ESTADOS = {
 };
 
 const DIAS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+const HORAS_EDICION_HC = 24;   // igual que horas_edicion_hc() en la base
 const TIPOS_RECETA = { lejos: 'Lejos', cerca: 'Cerca', intermedia: 'Intermedia', multifocal: 'Multifocal', contacto: 'Lentes de contacto' };
 const OBRAS_SOCIALES = ['Particular', 'OSDE', 'Swiss Medical', 'Galeno', 'Medifé', 'IOMA', 'PAMI', 'OSECAC', 'Omint', 'Sancor Salud'];
 
@@ -132,7 +133,7 @@ const fmtFecha = (iso) => iso ? iso.slice(0, 10).split('-').reverse().join('/') 
 const fmtHora = (h) => (h || '').slice(0, 5);
 const fmtFechaLarga = (iso) => new Date(iso + 'T00:00')
   .toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
-const fmtFechaHora = (ts) => new Date(ts).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+const fmtFechaHora = (ts) => new Date(ts).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
 const formatoDinero = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 });
 const dinero = (n) => (n === null || n === undefined || n === '') ? '—' : formatoDinero.format(n);
 const numero = (n, dec = 0) => Number(n || 0).toLocaleString('es-AR', { maximumFractionDigits: dec, minimumFractionDigits: dec });
@@ -226,25 +227,26 @@ function exportarCSV(nombreArchivo, encabezados, filas) {
  *  onGuardar(datos, form) → si lanza un error, la ventana queda abierta.
  *  alAbrir(form) → para enlazar eventos propios del formulario.
  */
-function abrirModal({ titulo, cuerpo, tam = '', textoGuardar = 'Guardar', claseGuardar = '', onGuardar, alAbrir, soloLectura = false }) {
+function abrirModal({ titulo, cuerpo, tam = '', textoGuardar = 'Guardar', claseGuardar = '', onGuardar, alAbrir, soloLectura = false,
+  bloqueante = false, textoCancelar = null, onCancelar = null }) {
   const fondo = document.createElement('div');
   fondo.className = 'modal-fondo';
   fondo.innerHTML = `
     <form class="modal ${tam}" novalidate>
       <div class="modal-cab"><h3>${esc(titulo)}</h3>
-        <button type="button" class="btn btn-icono" data-cerrar title="Cerrar">${icono('cerrar')}</button></div>
+        ${bloqueante ? '' : `<button type="button" class="btn btn-icono" data-cerrar title="Cerrar">${icono('cerrar')}</button>`}</div>
       <div class="modal-cuerpo">${cuerpo}</div>
       <div class="modal-pie">
-        <button type="button" class="btn btn-sec" data-cerrar>${soloLectura ? 'Cerrar' : 'Cancelar'}</button>
+        <button type="button" class="btn btn-sec" data-cerrar>${textoCancelar || (soloLectura ? 'Cerrar' : 'Cancelar')}</button>
         ${soloLectura ? '' : `<button type="submit" class="btn ${claseGuardar}">${esc(textoGuardar)}</button>`}
       </div>
     </form>`;
   const form = $('form', fondo);
   const cerrar = () => { fondo.remove(); document.removeEventListener('keydown', alTeclear); };
-  const alTeclear = (e) => { if (e.key === 'Escape' && fondo === $('#modales').lastElementChild) cerrar(); };
+  const alTeclear = (e) => { if (!bloqueante && e.key === 'Escape' && fondo === $('#modales').lastElementChild) cerrar(); };
 
-  $$('[data-cerrar]', fondo).forEach((b) => b.addEventListener('click', cerrar));
-  fondo.addEventListener('mousedown', (e) => { if (e.target === fondo) cerrar(); });
+  $$('[data-cerrar]', fondo).forEach((b) => b.addEventListener('click', () => { cerrar(); if (onCancelar) onCancelar(); }));
+  fondo.addEventListener('mousedown', (e) => { if (!bloqueante && e.target === fondo) cerrar(); });
   document.addEventListener('keydown', alTeclear);
 
   form.addEventListener('submit', async (e) => {
@@ -371,6 +373,11 @@ async function entrar() {
     if (!perfil) { await BD.logout(); return mostrarLogin('Tu usuario no tiene un perfil asignado. Consultá con el administrador.'); }
     if (!perfil.activo) { await BD.logout(); return mostrarLogin('Tu usuario está desactivado. Consultá con el administrador.'); }
     APP.perfil = perfil;
+    // compromiso de confidencialidad: se acepta una vez antes de ver cualquier dato
+    if (!perfil.confidencialidad_aceptada_at) {
+      const acepto = await pedirConfidencialidad();
+      if (!acepto) return cerrarSesion();
+    }
     await cargarCatalogos();
   } catch (e) {
     return mostrarLogin(e.message);
@@ -500,6 +507,9 @@ function enlazarEventos() {
     APP.pacientes.texto = e.target.value; APP.pacientes.pagina = 0; cargarPacientes();
   }));
   $('#btn-nuevo-paciente').addEventListener('click', () => modalPaciente());
+  $('#pacientes-bajas').addEventListener('change', (e) => {
+    APP.pacientes.incluirBajas = e.target.checked; APP.pacientes.pagina = 0; cargarPacientes();
+  });
   $('#pacientes-tabla').addEventListener('click', accionPaciente);
   $('#pacientes-paginacion').addEventListener('click', (e) => {
     const b = e.target.closest('[data-pagina]');
@@ -974,7 +984,7 @@ async function cargarPacientes() {
   const { texto, pagina, porPagina } = APP.pacientes;
   if ($('#pacientes-buscar').value !== texto) $('#pacientes-buscar').value = texto;
   $('#pacientes-tabla').innerHTML = cargando();
-  const { filas, total } = await BD.buscarPacientes(texto, { pagina, porPagina });
+  const { filas, total } = await BD.buscarPacientes(texto, { pagina, porPagina, incluirBajas: APP.pacientes.incluirBajas });
 
   $('#pacientes-total').textContent = `${numero(total)} paciente${total === 1 ? '' : 's'}`;
   $('#pacientes-tabla').innerHTML = filas.length ? `
@@ -982,7 +992,10 @@ async function cargarPacientes() {
       <th>Paciente</th><th>DNI</th><th>Edad</th><th>Teléfono</th><th>Obra social</th><th>Localidad</th><th></th>
     </tr></thead><tbody>
     ${filas.map((p) => `<tr>
-      <td><a href="#paciente/${p.id}"><b>${esc(p.apellido)}</b>, ${esc(p.nombre)}</a>${p.email ? `<span class="sub">${esc(p.email)}</span>` : ''}</td>
+      <td><a href="#paciente/${p.id}"><b>${esc(p.apellido)}</b>, ${esc(p.nombre)}</a>
+        ${!p.activo ? '<span class="badge badge-inactivo">Baja</span>' : ''}
+        ${p.activo && !p.consentimiento_datos ? '<span class="badge badge-pendiente" title="Falta el consentimiento firmado de datos personales">Sin consentimiento</span>' : ''}
+        ${p.email ? `<span class="sub">${esc(p.email)}</span>` : ''}</td>
       <td>${esc(p.dni)}</td>
       <td>${edad(p.fecha_nacimiento) ?? '—'}</td>
       <td>${esc(p.telefono || '—')}</td>
@@ -990,9 +1003,11 @@ async function cargarPacientes() {
       <td>${esc(p.localidad || '—')}</td>
       <td><div class="acciones">
         <button class="btn btn-icono" data-accion="ficha" data-id="${p.id}" title="Ver ficha">${icono('ver')}</button>
-        <button class="btn btn-icono" data-accion="turno" data-id="${p.id}" data-texto="${esc(`${p.apellido}, ${p.nombre}`)}" title="Dar turno">${icono('calendario')}</button>
+        ${p.activo ? `<button class="btn btn-icono" data-accion="turno" data-id="${p.id}" data-texto="${esc(`${p.apellido}, ${p.nombre}`)}" title="Dar turno">${icono('calendario')}</button>` : ''}
         <button class="btn btn-icono" data-accion="editar" data-id="${p.id}" title="Editar">${icono('editar')}</button>
-        ${esAdmin() ? `<button class="btn btn-icono peligro" data-accion="eliminar" data-id="${p.id}" data-texto="${esc(`${p.apellido}, ${p.nombre}`)}" title="Eliminar">${icono('borrar')}</button>` : ''}
+        ${esAdmin() ? (p.activo
+          ? `<button class="btn btn-icono peligro" data-accion="baja" data-id="${p.id}" data-texto="${esc(`${p.apellido}, ${p.nombre}`)}" title="Dar de baja">${icono('ausente')}</button>`
+          : `<button class="btn btn-icono" data-accion="reactivar" data-id="${p.id}" title="Reactivar">${icono('deshacer')}</button>`) : ''}
       </div></td></tr>`).join('')}
     </tbody></table>` : vacio(texto ? 'No se encontraron pacientes con ese criterio.' : 'Todavía no hay pacientes cargados.');
 
@@ -1014,11 +1029,10 @@ async function accionPaciente(e) {
       case 'ficha': return irA(`#paciente/${id}`);
       case 'turno': return modalTurno({ paciente_id: id, paciente: b.dataset.texto, fecha: hoy() });
       case 'editar': return modalPaciente(await BD.obtenerPaciente(id), cargarPacientes);
-      case 'eliminar':
-        if (!await confirmar(`¿Eliminar al paciente <b>${esc(b.dataset.texto)}</b>? Se borrará también su historia clínica. No se puede eliminar si tiene turnos registrados.`,
-          { textoOk: 'Eliminar', peligro: true })) return;
-        await BD.eliminarPaciente(id);
-        aviso('Paciente eliminado');
+      case 'baja': return modalBajaPaciente(id, b.dataset.texto, cargarPacientes);
+      case 'reactivar':
+        await BD.reactivarPaciente(id);
+        aviso('Paciente reactivado');
         cargarPacientes();
     }
   } catch (err) { avisoError(err); }
@@ -1051,9 +1065,13 @@ function modalPaciente(p = null, alGuardar = null) {
           <datalist id="lista-obras">${OBRAS_SOCIALES.map((o) => `<option value="${esc(o)}">`).join('')}</datalist></div>
         <div class="campo"><label>Nº de afiliado</label><input name="nro_afiliado" value="${v('nro_afiliado')}"></div>
       </div>
-      <div class="campo"><label>Observaciones</label><textarea name="observaciones" rows="2">${v('observaciones')}</textarea></div>`,
+      <div class="campo"><label>Observaciones</label><textarea name="observaciones" rows="2">${v('observaciones')}</textarea></div>
+      ${p ? '' : `<label class="check"><input type="checkbox" name="consentimiento"> El paciente firmó el consentimiento de datos personales</label>
+        <div class="ayuda" style="margin-top:-8px">Si todavía no lo firmó, podés imprimir el formulario desde su ficha y registrarlo después.</div>`}`,
     onGuardar: async (d) => {
-      const guardado = await BD.guardarPaciente({ ...d, id: p?.id });
+      const { consentimiento, ...datos } = d;
+      const guardado = await BD.guardarPaciente({ ...datos, id: p?.id });
+      if (!p && consentimiento) await BD.registrarConsentimiento(guardado.id, true);
       aviso(p ? 'Paciente actualizado' : 'Paciente registrado');
       if (alGuardar) alGuardar(guardado);
       else if (location.hash.startsWith('#pacientes')) cargarPacientes();
@@ -1091,11 +1109,27 @@ function pintarCabeceraFicha() {
           <span>Cobertura <b>${esc(p.obra_social || 'Sin datos')}</b>${p.nro_afiliado ? ` · ${esc(p.nro_afiliado)}` : ''}</span>
         </div>
       </div>
-      <div class="acciones" style="gap:8px">
+      <div class="acciones" style="gap:8px;flex-wrap:wrap">
         <button class="btn btn-sec" data-ficha="editar">${icono('editar')} Editar</button>
-        <button class="btn btn-sec" data-ficha="turno">${icono('calendario')} Dar turno</button>
-        ${puedeVerHC() && (esAdmin() || APP.perfil.profesional_id) ? `<button class="btn" data-ficha="consulta">${icono('mas')} Nueva consulta</button>` : ''}
+        ${p.activo ? `<button class="btn btn-sec" data-ficha="turno">${icono('calendario')} Dar turno</button>` : ''}
+        ${puedeVerHC() ? `<button class="btn btn-sec" data-ficha="imprimir-hc">${icono('imprimir')} Imprimir historia clínica</button>` : ''}
+        ${puedeVerHC() && p.activo && (esAdmin() || APP.perfil.profesional_id) ? `<button class="btn" data-ficha="consulta">${icono('mas')} Nueva consulta</button>` : ''}
       </div>
+    </div>
+    <div class="ficha-legal">
+      ${p.activo ? '' : `<div class="legal-item baja">${icono('ausente', 'icono-sm')}
+        <span><b>Paciente dado de baja</b> el ${fmtFechaHora(p.fecha_baja)}${p.motivo_baja ? ` · Motivo: ${esc(p.motivo_baja)}` : ''}.
+        Su historia clínica se conserva por ley.</span>
+        ${esAdmin() ? '<button class="btn btn-sec btn-chico" data-ficha="reactivar">Reactivar</button>' : ''}</div>`}
+      <div class="legal-item ${p.consentimiento_datos ? 'ok' : 'pendiente'}">${icono(p.consentimiento_datos ? 'checkCirculo' : 'reloj', 'icono-sm')}
+        <span>${p.consentimiento_datos
+          ? `<b>Consentimiento de datos firmado</b> · registrado el ${fmtFechaHora(p.consentimiento_fecha)} por ${esc(p.consentimiento_registrado_por || '—')}`
+          : `<b>Falta el consentimiento de datos personales</b>${p.consentimiento_fecha ? ` (revocado el ${fmtFechaHora(p.consentimiento_fecha)})` : ''}. Imprimí el formulario, hacelo firmar y registralo.`}</span>
+        <button class="btn btn-sec btn-chico" data-ficha="form-consentimiento">${icono('imprimir', 'icono-sm')} Formulario</button>
+        ${!p.consentimiento_datos ? `<button class="btn btn-chico btn-verde" data-ficha="registrar-consentimiento">${icono('check', 'icono-sm')} Registrar firmado</button>`
+          : esAdmin() ? '<button class="btn btn-sec btn-chico" data-ficha="revocar-consentimiento">Revocar</button>' : ''}
+      </div>
+      ${esAdmin() && p.activo ? `<div class="legal-acciones"><button class="btn btn-sec btn-chico peligro-texto" data-ficha="baja">${icono('ausente', 'icono-sm')} Dar de baja</button></div>` : ''}
     </div>`;
   const pestanas = [
     puedeVerHC() && ['historia', 'Historia clínica'],
@@ -1156,7 +1190,10 @@ async function pintarFicha() {
       ${fila('Nº de afiliado', p.nro_afiliado)}
       ${fila('Observaciones', p.observaciones)}
       ${fila('Alta en el sistema', fmtFechaHora(p.created_at))}
-    </dl></div>`;
+    </dl></div>
+    ${esAdmin() ? `<div class="ayuda" style="margin-top:18px;border-top:1px solid var(--gris-claro);padding-top:12px">
+      Solo se puede eliminar definitivamente un paciente cargado por error, que nunca tuvo turnos ni historia clínica.
+      <button class="btn btn-sec btn-chico peligro-texto" data-ficha="eliminar" style="margin-left:8px">${icono('borrar', 'icono-sm')} Eliminar definitivamente</button></div>` : ''}`;
   }
 }
 
@@ -1171,8 +1208,11 @@ function tarjetaConsulta(c) {
       <div class="consulta-cab">
         <div><div class="fecha">${fmtFechaHora(c.fecha)}</div>
           <div class="prof">${esc(prof)}${c.profesionales?.especialidad ? ' · ' + esc(c.profesionales.especialidad) : ''}</div></div>
-        <div class="acciones">
-          ${puedeEditarConsulta(c) ? `<button class="btn btn-icono" data-ficha="editar-consulta" data-id="${c.id}" title="Editar consulta">${icono('editar')}</button>` : ''}
+        <div class="acciones" style="align-items:center;gap:6px">
+          ${puedeEditarConsulta(c) && consultaEditable(c) ? `<span class="ayuda">Editable hasta ${fmtFechaHora(limiteEdicion(c))}</span>
+            <button class="btn btn-icono" data-ficha="editar-consulta" data-id="${c.id}" title="Editar consulta">${icono('editar')}</button>` : ''}
+          ${puedeVerHC() && !consultaEditable(c) ? `<span class="badge badge-neutro" title="Pasaron más de ${HORAS_EDICION_HC} h: el registro es inalterable">${icono('escudo', 'icono-sm')} Cerrada</span>` : ''}
+          ${puedeVerHC() ? `<button class="btn btn-sec btn-chico" data-ficha="enmienda" data-id="${c.id}" title="Agregar una corrección o aclaración">${icono('mas', 'icono-sm')} Enmienda</button>` : ''}
         </div>
       </div>
       <dl>
@@ -1189,6 +1229,11 @@ function tarjetaConsulta(c) {
           <button class="btn btn-sec btn-chico" data-ficha="imprimir-receta" data-id="${c.id}" data-receta="${r.id}">${icono('imprimir', 'icono-sm')} Imprimir</button></div>
         ${tablaReceta(r)}
         ${r.observaciones ? `<div class="ayuda" style="margin-top:6px">${esc(r.observaciones)}</div>` : ''}`).join('')}
+      ${(c.enmiendas_hc || []).sort((a, b) => a.created_at.localeCompare(b.created_at)).map((en) => `
+        <div class="enmienda">
+          <div class="enmienda-cab">${icono('editar', 'icono-sm')} <b>Enmienda</b> · ${fmtFechaHora(en.created_at)} · ${esc(en.autor || '—')}</div>
+          <div>${esc(en.texto)}</div>
+        </div>`).join('')}
     </div>`;
 }
 
@@ -1216,6 +1261,30 @@ async function accionFicha(e) {
       return modalTurno({ paciente_id: p.id, paciente: `${p.apellido}, ${p.nombre}`, fecha: hoy() });
     case 'consulta':
       return modalConsulta({ paciente: p, alGuardar: () => { APP.ficha.pestana = 'historia'; pintarFicha(); } });
+    case 'imprimir-hc': return imprimirHistoriaClinica(p);
+    case 'form-consentimiento': return imprimirConsentimiento(p);
+    case 'registrar-consentimiento':
+      if (!await confirmar(`¿Confirmás que <b>${esc(p.apellido)}, ${esc(p.nombre)}</b> firmó el consentimiento de datos personales? Guardá el formulario firmado en papel.`,
+        { textoOk: 'Registrar' })) return;
+      try { await BD.registrarConsentimiento(p.id, true); aviso('Consentimiento registrado'); await recargarFicha(); } catch (err) { avisoError(err); }
+      return;
+    case 'revocar-consentimiento':
+      if (!await confirmar('¿Registrar que el paciente <b>revocó</b> su consentimiento? Su historia clínica se conserva igual por obligación legal.', { textoOk: 'Revocar', peligro: true })) return;
+      try { await BD.registrarConsentimiento(p.id, false); aviso('Revocación registrada'); await recargarFicha(); } catch (err) { avisoError(err); }
+      return;
+    case 'baja': return modalBajaPaciente(p.id, `${p.apellido}, ${p.nombre}`, recargarFicha);
+    case 'reactivar':
+      try { await BD.reactivarPaciente(p.id); aviso('Paciente reactivado'); await recargarFicha(); } catch (err) { avisoError(err); }
+      return;
+    case 'eliminar':
+      if (!await confirmar(`¿Eliminar definitivamente a <b>${esc(p.apellido)}, ${esc(p.nombre)}</b>? Solo es posible si nunca tuvo turnos ni historia clínica.`,
+        { textoOk: 'Eliminar', peligro: true })) return;
+      try { await BD.eliminarPaciente(p.id); aviso('Paciente eliminado'); irA('#pacientes'); } catch (err) { avisoError(err); }
+      return;
+    case 'enmienda': {
+      const c = APP.ficha.consultas.find((x) => x.id === Number(b.dataset.id));
+      return modalEnmienda(c);
+    }
     case 'editar-consulta': {
       const c = APP.ficha.consultas.find((x) => x.id === Number(b.dataset.id));
       return modalConsulta({ paciente: p, consulta: c, alGuardar: pintarFicha });
@@ -1747,7 +1816,7 @@ async function cargarUsuarios() {
   const usuarios = await BD.listarUsuarios();
   APP.usuarios = usuarios;
   $('#usuarios-tabla').innerHTML = `
-    <table class="tabla"><thead><tr><th>Usuario</th><th>Rol</th><th>Profesional vinculado</th><th>Estado</th><th>Alta</th><th></th></tr></thead><tbody>
+    <table class="tabla"><thead><tr><th>Usuario</th><th>Rol</th><th>Profesional vinculado</th><th>Estado</th><th>Confidencialidad</th><th>Alta</th><th></th></tr></thead><tbody>
     ${usuarios.map((u) => `<tr>
       <td><div style="display:flex;gap:10px;align-items:center">
         <div class="avatar" style="width:30px;height:30px;font-size:11px">${esc(iniciales(u.nombre || u.email, u.apellido))}</div>
@@ -1756,6 +1825,7 @@ async function cargarUsuarios() {
       <td>${badgeRol(u.rol)}</td>
       <td>${u.profesionales ? esc(nombreProf(u.profesionales)) : '<span class="c-suave">—</span>'}</td>
       <td><span class="badge badge-${u.activo ? 'activo' : 'inactivo'}">${u.activo ? 'Activo' : 'Inactivo'}</span></td>
+      <td>${u.confidencialidad_aceptada_at ? `<span class="c-verde">Aceptó el ${fmtFecha(u.confidencialidad_aceptada_at)}</span>` : '<span class="c-suave">Pendiente (se pide al ingresar)</span>'}</td>
       <td>${fmtFecha(u.created_at)}</td>
       <td><div class="acciones">
         <button class="btn btn-icono" data-accion="editar" data-id="${u.id}" title="Editar">${icono('editar')}</button>
@@ -2401,5 +2471,200 @@ async function exportarAuditoria() {
       todas.map((f) => [fmtFechaHora(f.created_at), f.usuario_email || 'Sistema', ROLES[f.usuario_rol] || '',
         (ACCIONES_AUDITORIA[f.accion] || [f.accion])[0], TABLAS_AUDITORIA[f.tabla] || f.tabla, f.registro_id || '',
         f.paciente || '', f.detalle ? JSON.stringify(f.detalle) : '', f.ip || '']));
+  } catch (e) { avisoError(e); }
+}
+
+// ---------------------------------------------------------------------
+// 19. MARCO LEGAL
+//     Ley 25.326 (datos personales) · Ley 26.529 (derechos del paciente
+//     e historia clínica) · Ley 27.706 y Decreto 393/2023 (HC electrónica)
+// ---------------------------------------------------------------------
+
+// --- Historia clínica inalterable: plazo de corrección y enmiendas ---
+const limiteEdicion = (c) => new Date(new Date(c.created_at).getTime() + HORAS_EDICION_HC * 3600000).toISOString();
+const consultaEditable = (c) => Date.now() < new Date(limiteEdicion(c)).getTime();
+
+async function recargarFicha() {
+  APP.ficha.paciente = await BD.obtenerPaciente(APP.ficha.paciente.id);
+  pintarCabeceraFicha();
+  await pintarFicha();
+}
+
+function modalEnmienda(c) {
+  const prof = c.profesionales ? `${c.profesionales.apellido}, ${c.profesionales.nombre}` : '';
+  abrirModal({
+    titulo: 'Agregar enmienda a la historia clínica', textoGuardar: 'Guardar enmienda',
+    cuerpo: `
+      <div class="nota" style="margin-bottom:14px">
+        Consulta del <b>${fmtFechaHora(c.fecha)}</b>${prof ? ` · ${esc(prof)}` : ''}<br>
+        Motivo: ${esc(c.motivo)}${c.diagnostico ? ` · Diagnóstico: ${esc(c.diagnostico)}` : ''}
+      </div>
+      <p class="ayuda" style="margin:0 0 12px">La enmienda <b>no reemplaza</b> lo registrado: se agrega debajo con tu nombre, la fecha y la hora,
+        y no se puede modificar ni borrar (Ley 26.529, art. 13).</p>
+      <div class="campo"><label>Texto de la enmienda <span class="req">*</span></label>
+        <textarea name="texto" rows="4" required minlength="3" placeholder="Ej.: Se corrige la agudeza visual del OD: 8/10 (no 6/10)."></textarea></div>`,
+    onGuardar: async (d) => {
+      await BD.agregarEnmienda(c.id, d.texto, rol() === 'medico' ? APP.perfil.profesional_id : null);
+      aviso('Enmienda registrada');
+      APP.ficha.pestana = 'historia';
+      await pintarFicha();
+    },
+  });
+}
+
+// --- Conservación: baja lógica del paciente ---
+function modalBajaPaciente(id, nombre, despues) {
+  abrirModal({
+    titulo: 'Dar de baja al paciente', tam: 'chico', textoGuardar: 'Dar de baja', claseGuardar: 'btn-peligro',
+    cuerpo: `
+      <p style="margin:0 0 12px;line-height:1.5"><b>${esc(nombre)}</b> dejará de aparecer en las búsquedas y no se le podrán dar turnos.
+        Sus turnos futuros pendientes se cancelan.</p>
+      <p class="ayuda" style="margin:0 0 14px">Su historia clínica y sus turnos <b>se conservan</b> (Ley 26.529: mínimo 10 años). Se puede reactivar en cualquier momento.</p>
+      <div class="campo"><label>Motivo <span class="req">*</span></label>
+        <input name="motivo" required maxlength="200" placeholder="Ej.: Se mudó · Paciente duplicado · Fallecimiento"></div>`,
+    onGuardar: async (d) => {
+      await BD.darDeBajaPaciente(id, d.motivo);
+      aviso('Paciente dado de baja');
+      if (despues) await despues();
+    },
+  });
+}
+
+// --- Compromiso de confidencialidad (primer ingreso de cada usuario) ---
+function pedirConfidencialidad() {
+  return new Promise((resolver) => {
+    const optica = esc(APP.config?.nombre_optica || 'la óptica');
+    abrirModal({
+      titulo: 'Compromiso de confidencialidad', tam: 'ancho', bloqueante: true,
+      textoGuardar: 'Acepto el compromiso', textoCancelar: 'No acepto (salir)',
+      cuerpo: `
+        <p style="margin:0 0 12px;line-height:1.55">Antes de usar el sistema por primera vez, tenés que aceptar este compromiso.
+          Se basa en el deber de confidencialidad de la <b>Ley 25.326</b> (art. 10), el derecho del paciente a la confidencialidad
+          de la <b>Ley 26.529</b> (art. 2) y el secreto profesional.</p>
+        <ol class="lista-legal">
+          <li>La información de los pacientes de ${optica}, en especial la de salud, es <b>confidencial</b>. La uso solo para las tareas propias de mi función.</li>
+          <li><b>No comparto</b> mi usuario ni mi contraseña, y <b>cierro la sesión</b> al dejar la computadora.</li>
+          <li>No copio, fotografío, imprimo, exporto ni envío datos de pacientes más allá de lo necesario para la atención.</li>
+          <li>Sé que mis <b>accesos y acciones quedan registrados</b> en la auditoría del sistema.</li>
+          <li>Esta obligación <b>continúa</b> aun después de terminar mi relación con ${optica}.</li>
+        </ol>
+        <p class="ayuda" style="margin:12px 0 0">Al aceptar, se registran la fecha y la hora. Si no aceptás, se cierra la sesión.</p>`,
+      onGuardar: async () => {
+        await BD.aceptarConfidencialidad();
+        APP.perfil.confidencialidad_aceptada_at = new Date().toISOString();
+        resolver(true);
+      },
+      onCancelar: () => resolver(false),
+    });
+  });
+}
+
+// --- Ventana de impresión con el encabezado de la óptica ---
+function ventanaImpresion(titulo, contenido) {
+  const cfg = APP.config || {};
+  const w = window.open('', '_blank', 'width=900,height=1000');
+  if (!w) { aviso('El navegador bloqueó la ventana de impresión. Permití ventanas emergentes.', 'error'); return; }
+  w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>${esc(titulo)}</title>
+    <style>
+      body{font-family:Lato,Arial,sans-serif;color:#2F3A42;margin:36px;font-size:13px;line-height:1.5}
+      .cab{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #2196F3;padding-bottom:12px;margin-bottom:20px}
+      .cab h1{margin:0;font-size:20px} .cab small{color:#6F7D88} .cab img{max-height:56px}
+      h2{font-size:17px;margin:0 0 10px} h3{font-size:14px;margin:18px 0 6px}
+      table{border-collapse:collapse;width:100%;margin:8px 0} th,td{border:1px solid #C9D2D9;padding:6px 8px;text-align:left;vertical-align:top}
+      th{background:#F6F8FA;font-size:11.5px}
+      .receta td,.receta th{text-align:center} .receta td:first-child{font-weight:700;background:#F6F8FA}
+      .datos{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px;margin-bottom:12px}
+      .consulta{border:1px solid #DFE5EA;border-radius:6px;padding:10px 14px;margin:12px 0;break-inside:avoid}
+      .consulta .t{font-weight:700} .consulta .p{color:#6F7D88}
+      dl{display:grid;grid-template-columns:140px 1fr;gap:2px 10px;margin:8px 0} dt{color:#6F7D88} dd{margin:0}
+      .enm{background:#FEF4E2;border-left:3px solid #F0A92E;padding:6px 10px;margin-top:8px}
+      ol li{margin-bottom:6px} .legal{font-size:11.5px;color:#4A5660;border:1px solid #DFE5EA;padding:10px;border-radius:6px;margin-top:14px}
+      .firmas{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:70px}
+      .firmas div{border-top:1px solid #2F3A42;padding-top:6px;text-align:center;font-size:12px}
+      .casilla{display:inline-block;width:12px;height:12px;border:1px solid #2F3A42;margin-right:6px;vertical-align:-2px}
+      .pie{margin-top:24px;font-size:11px;color:#6F7D88;border-top:1px solid #DFE5EA;padding-top:8px}
+      @media print{body{margin:14mm}}
+    </style></head><body>
+    <div class="cab"><div><h1>${esc(cfg.nombre_optica || 'Óptica')}</h1>
+      <small>${esc([cfg.razon_social, cfg.cuit ? 'CUIT ' + cfg.cuit : '', cfg.direccion, cfg.telefono, cfg.email].filter(Boolean).join(' · '))}</small></div>
+      ${cfg.logo_url ? `<img src="${esc(cfg.logo_url)}" alt="">` : ''}</div>
+    ${contenido}
+    <script>window.onload=()=>{window.print();}<\/script></body></html>`);
+  w.document.close();
+}
+
+// --- Formulario de información y consentimiento (Ley 25.326) ---
+function imprimirConsentimiento(p) {
+  BD.registrarAcceso('imprimir', 'pacientes', p.id, { documento: 'formulario_consentimiento' });
+  const cfg = APP.config || {};
+  const responsable = esc(cfg.razon_social || cfg.nombre_optica || 'la óptica');
+  const contacto = esc([cfg.direccion, cfg.email, cfg.telefono].filter(Boolean).join(' · ') || 'el domicilio de la óptica');
+  const e = edad(p.fecha_nacimiento);
+  ventanaImpresion('Consentimiento de datos personales', `
+    <h2>Información y consentimiento para el tratamiento de datos personales y de salud</h2>
+    <div class="datos">
+      <div><b>Paciente:</b> ${esc(p.apellido)}, ${esc(p.nombre)}</div><div><b>DNI:</b> ${esc(p.dni)}</div>
+      <div><b>Fecha de nacimiento:</b> ${fmtFecha(p.fecha_nacimiento) || '—'}</div><div><b>Teléfono:</b> ${esc(p.telefono || '—')}</div>
+    </div>
+    <p>En cumplimiento de la <b>Ley N° 25.326</b> de Protección de los Datos Personales y de la <b>Ley N° 26.529</b> de Derechos del Paciente, se le informa:</p>
+    <ol>
+      <li><b>Responsable de la base de datos:</b> ${responsable}${cfg.cuit ? `, CUIT ${esc(cfg.cuit)}` : ''}, con domicilio y contacto en ${contacto}. Sus datos se incorporan a la base de datos de pacientes, de la que es responsable.</li>
+      <li><b>Finalidad:</b> gestionar sus turnos, brindarle atención oftalmológica y óptica, registrar su historia clínica y sus recetas, facturar las prácticas y comunicarse con usted por temas vinculados a su atención.</li>
+      <li><b>Datos de salud:</b> son datos sensibles. Se tratan bajo secreto profesional y solo acceden las personas autorizadas, según su función. Todos los accesos quedan registrados.</li>
+      <li><b>Carácter de los datos:</b> los datos de identificación y de salud son necesarios para su atención. Si no se brindan, la atención puede verse imposibilitada.</li>
+      <li><b>Conservación:</b> su historia clínica se conserva por un plazo mínimo de <b>diez (10) años</b> (Ley 26.529, art. 18), aun si usted revoca este consentimiento.</li>
+      <li><b>Alojamiento de la información:</b> los datos se guardan en servidores de un proveedor de servicios en la nube que pueden estar ubicados <b>fuera de la República Argentina</b>, con medidas de seguridad, acceso restringido y cifrado en la transmisión.</li>
+      <li><b>Sus derechos:</b> puede solicitar el <b>acceso</b> a sus datos en forma gratuita a intervalos no inferiores a seis meses, salvo que acredite un interés legítimo (Ley 25.326, art. 14, inc. 3), y su <b>rectificación, actualización o supresión</b> (art. 16), excepto los datos que la ley obliga a conservar. Además, tiene derecho a recibir una <b>copia de su historia clínica</b> dentro de las 48 horas de solicitada (Ley 26.529, art. 14). Puede ejercer estos derechos ante ${contacto}.</li>
+    </ol>
+    <div class="legal">La AGENCIA DE ACCESO A LA INFORMACIÓN PÚBLICA, en su carácter de Órgano de Control de la Ley N° 25.326, tiene la atribución de atender las denuncias y reclamos que interpongan quienes resulten afectados en sus derechos por incumplimiento de las normas vigentes en materia de protección de datos personales.</div>
+    <h3>Consentimiento</h3>
+    <p><span class="casilla"></span> Presto mi consentimiento libre, expreso e informado para el tratamiento de mis datos personales y de salud con las finalidades indicadas, incluido su alojamiento en servidores ubicados fuera del país.</p>
+    <p><span class="casilla"></span> Acepto recibir recordatorios de turnos por WhatsApp, SMS o correo electrónico (opcional).</p>
+    <div class="firmas">
+      <div>Firma del paciente${e !== null && e < 18 ? ' o de su representante legal' : ''}</div>
+      <div>Aclaración y DNI${e !== null && e < 18 ? ' (del representante)' : ''}</div>
+    </div>
+    <p style="margin-top:28px">Lugar y fecha: ____________________________________</p>
+    <div class="pie">Formulario generado el ${fmtFechaHora(new Date().toISOString())}. Conservar el original firmado.</div>`);
+}
+
+// --- Copia completa de la historia clínica (Ley 26.529, art. 14) ---
+async function imprimirHistoriaClinica(p) {
+  try {
+    const consultas = (await BD.listarConsultas(p.id)).sort((a, b) => a.fecha.localeCompare(b.fecha));
+    BD.registrarAcceso('imprimir', 'consultas', p.id, { documento: 'historia_clinica_completa', consultas: consultas.length });
+    const item = (t, v) => v ? `<dt>${t}</dt><dd>${esc(v)}</dd>` : '';
+    const cuerpo = consultas.map((c, i) => {
+      const prof = c.profesionales || {};
+      const av = (c.av_od_sc || c.av_oi_sc || c.av_od_cc || c.av_oi_cc)
+        ? `OD ${c.av_od_sc || '—'} sc / ${c.av_od_cc || '—'} cc · OI ${c.av_oi_sc || '—'} sc / ${c.av_oi_cc || '—'} cc` : '';
+      const pio = (c.pio_od || c.pio_oi) ? `OD ${c.pio_od ?? '—'} · OI ${c.pio_oi ?? '—'} mmHg` : '';
+      return `<div class="consulta">
+        <div class="t">${i + 1}. Consulta del ${fmtFechaHora(c.fecha)}</div>
+        <div class="p">${esc(prof.apellido ? `${prof.apellido}, ${prof.nombre}` : '')}${prof.matricula ? ` · ${esc(prof.matricula)}` : ''}${prof.especialidad ? ` · ${esc(prof.especialidad)}` : ''}
+          · Registrada el ${fmtFechaHora(c.created_at)}</div>
+        <dl>${item('Motivo', c.motivo)}${item('Antecedentes', c.antecedentes)}${item('Agudeza visual', av)}${item('Presión ocular', pio)}
+          ${item('Diagnóstico', c.diagnostico)}${item('Indicaciones', c.indicaciones)}${item('Observaciones', c.observaciones)}</dl>
+        ${(c.recetas || []).map((r) => `<div><b>Receta · ${esc(TIPOS_RECETA[r.tipo] || r.tipo)}</b></div>
+          <table class="receta">${tablaReceta(r).replace(/^<table[^>]*>/, '').replace(/<\/table>$/, '')}</table>
+          ${r.observaciones ? `<div>${esc(r.observaciones)}</div>` : ''}`).join('')}
+        ${(c.enmiendas_hc || []).sort((a, b) => a.created_at.localeCompare(b.created_at)).map((en) =>
+          `<div class="enm"><b>Enmienda</b> · ${fmtFechaHora(en.created_at)} · ${esc(en.autor || '')}<br>${esc(en.texto)}</div>`).join('')}
+      </div>`;
+    }).join('');
+    const usuario = `${APP.perfil.nombre} ${APP.perfil.apellido}`.trim() || APP.perfil.email;
+    ventanaImpresion(`Historia clínica · ${p.apellido}, ${p.nombre}`, `
+      <h2>Copia de historia clínica</h2>
+      <div class="datos">
+        <div><b>Paciente:</b> ${esc(p.apellido)}, ${esc(p.nombre)}</div><div><b>DNI:</b> ${esc(p.dni)}</div>
+        <div><b>Fecha de nacimiento:</b> ${fmtFecha(p.fecha_nacimiento) || '—'}</div>
+        <div><b>Cobertura:</b> ${esc(p.obra_social || '—')} ${esc(p.nro_afiliado || '')}</div>
+        <div><b>Domicilio:</b> ${esc([p.direccion, p.localidad].filter(Boolean).join(', ') || '—')}</div>
+        <div><b>Consultas registradas:</b> ${consultas.length}</div>
+      </div>
+      ${cuerpo || '<p>El paciente no tiene consultas registradas.</p>'}
+      <div class="firmas"><div>Firma y sello del responsable</div><div>Recibí copia: firma y aclaración del paciente</div></div>
+      <div class="pie">Copia emitida el ${fmtFechaHora(new Date().toISOString())} por ${esc(usuario)}, a solicitud del paciente
+        (Ley 26.529, art. 14). La historia clínica original se conserva en el sistema y es inalterable.</div>`);
   } catch (e) { avisoError(e); }
 }
