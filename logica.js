@@ -2119,7 +2119,7 @@ function sonarAviso() {
   });
 }
 
-// Anuncia por voz: "Juan Pérez. Consultorio 2."
+// Anuncia por voz: "Juan Pérez, presentarse en consultorio 2."
 function anunciar(ll, veces = 1) {
   return new Promise((resolver) => {
     if (!('speechSynthesis' in window)) return resolver();
@@ -2127,7 +2127,7 @@ function anunciar(ll, veces = 1) {
     let pendientes = veces;
     const fin = () => { if (--pendientes <= 0) resolver(); };
     for (let i = 0; i < veces; i++) {
-      const u = new SpeechSynthesisUtterance(`${ll.paciente}. Consultorio ${ll.consultorio}.`);
+      const u = new SpeechSynthesisUtterance(`${ll.paciente}, presentarse en consultorio ${ll.consultorio}.`);
       u.lang = LLAMADOR.voz?.lang || 'es-AR';
       if (LLAMADOR.voz) u.voice = LLAMADOR.voz;
       u.rate = 0.9;
