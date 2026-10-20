@@ -51,6 +51,7 @@ const MENU = [
   { vista: 'reportes',      texto: 'Reportes',            icono: 'grafico',      roles: ['admin'] },
   { grupo: 'Sistema',                                                             roles: ['admin'] },
   { vista: 'usuarios',      texto: 'Usuarios',            icono: 'escudo',       roles: ['admin'] },
+  { vista: 'auditoria',     texto: 'Auditoría',           icono: 'ver',          roles: ['admin'] },
   { vista: 'configuracion', texto: 'Configuración',       icono: 'ajustes',      roles: ['admin'] },
 ];
 
@@ -64,6 +65,7 @@ const VISTAS = {
   practicas:     { titulo: 'Prácticas y tarifas', cargar: cargarPracticas },
   reportes:      { titulo: 'Reportes',            cargar: cargarReportes },
   usuarios:      { titulo: 'Usuarios',            cargar: cargarUsuarios },
+  auditoria:     { titulo: 'Auditoría',           cargar: cargarAuditoria },
   configuracion: { titulo: 'Configuración',       cargar: cargarConfiguracion },
 };
 
@@ -201,6 +203,7 @@ const opcionesPracticas = (valor, vacioTexto) => opciones(
 
 // Exporta una tabla (lista de filas) a CSV compatible con Excel en español
 function exportarCSV(nombreArchivo, encabezados, filas) {
+  BD.registrarAcceso('exportar', nombreArchivo.startsWith('auditoria') ? 'auditoria' : 'reportes', null, { archivo: nombreArchivo, filas: filas.length });
   const celda = (v) => {
     const s = typeof v === 'number' ? String(v).replace('.', ',') : String(v ?? '');
     return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -308,12 +311,19 @@ async function iniciar() {
   APP.config = await BD.obtenerConfiguracion();
   aplicarMarca();
 
+  // si otra pestaña cierra la sesión, esta se recarga limpia (sin datos en pantalla)
   supabaseClient.auth.onAuthStateChange((evento) => {
-    if (evento === 'SIGNED_OUT') mostrarLogin();
+    if (evento === 'SIGNED_OUT' && APP.perfil) location.replace(location.pathname);
   });
 
-  const sesion = await BD.sesionActual();
-  if (sesion) await entrar(); else mostrarLogin();
+  iniciarControlInactividad();
+  const motivo = new URLSearchParams(location.search).get('motivo');
+  if (motivo) history.replaceState(null, '', location.pathname + location.hash);
+
+  const sesion = await verificarSesionDeNavegador();
+  if (sesion && inactivoDemasiado()) return cerrarSesion('inactividad');
+  if (sesion) await entrar();
+  else mostrarLogin(motivo === 'inactividad' ? 'Tu sesión se cerró por inactividad. Ingresá nuevamente.' : undefined);
 }
 
 function pintarIconosFijos() {
@@ -326,6 +336,7 @@ function pintarIconosFijos() {
   $('#btn-nueva-tarifa').innerHTML = `${icono('mas')} Nueva tarifa`;
   $('#btn-nuevo-usuario').innerHTML = `${icono('mas')} Nuevo usuario`;
   $('#btn-imprimir-reporte').innerHTML = `${icono('imprimir')} Imprimir`;
+  $('#aud-exportar').innerHTML = `${icono('descargar')} Exportar CSV`;
   $('#btn-llamador').innerHTML = `${icono('pantalla')} <span class="texto-llamador">Llamador</span>`;
   $('#btn-mi-password').innerHTML = `${icono('llave')} Cambiar mi contraseña`;
   $('#btn-logout').innerHTML = `${icono('salir')} Cerrar sesión`;
@@ -442,6 +453,8 @@ function enlazarEventos() {
     $('#login-error').classList.add('oculto');
     try {
       await BD.login($('#login-email').value.trim(), $('#login-password').value);
+      marcarSesionNavegador();
+      registrarActividad(true);
       $('#login-password').value = '';
       await entrar();
     } catch (err) {
@@ -454,7 +467,7 @@ function enlazarEventos() {
   // menú de usuario
   $('#btn-usuario').addEventListener('click', (e) => { e.stopPropagation(); $('#menu-usuario').classList.toggle('oculto'); });
   document.addEventListener('click', () => $('#menu-usuario').classList.add('oculto'));
-  $('#btn-logout').addEventListener('click', async () => { await BD.logout(); location.hash = ''; mostrarLogin(); });
+  $('#btn-logout').addEventListener('click', () => cerrarSesion());
   $('#btn-mi-password').addEventListener('click', modalMiPassword);
   $('#btn-menu').addEventListener('click', () => $('#app').classList.toggle('menu-abierto'));
 
@@ -540,6 +553,18 @@ function enlazarEventos() {
   // usuarios
   $('#btn-nuevo-usuario').addEventListener('click', modalNuevoUsuario);
   $('#usuarios-tabla').addEventListener('click', accionUsuario);
+
+  // auditoría
+  $('#aud-buscar').addEventListener('click', () => { APP.auditoria.pagina = 0; cargarAuditoria(); });
+  $('#aud-exportar').addEventListener('click', exportarAuditoria);
+  $('#aud-paginacion').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-pagina]');
+    if (b) { APP.auditoria.pagina = Number(b.dataset.pagina); cargarAuditoria(); }
+  });
+  $('#aud-tabla').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-ver-detalle]');
+    if (b) verDetalleAuditoria(Number(b.dataset.verDetalle));
+  });
 
   // configuración
   $('#form-config').addEventListener('submit', guardarConfiguracion);
@@ -1043,6 +1068,7 @@ async function cargarFicha(id) {
   $('#ficha-cabecera').innerHTML = cargando();
   $('#ficha-contenido').innerHTML = '';
   const paciente = await BD.obtenerPaciente(Number(id));
+  BD.registrarAcceso('ver', 'pacientes', paciente.id);
   if (APP.ficha.paciente?.id !== paciente.id) APP.ficha.pestana = null;
   APP.ficha.paciente = paciente;
   APP.ficha.pestana ||= puedeVerHC() ? 'historia' : 'turnos';
@@ -1075,6 +1101,7 @@ function pintarCabeceraFicha() {
     puedeVerHC() && ['historia', 'Historia clínica'],
     ['turnos', 'Turnos'],
     ['datos', 'Datos personales'],
+    esAdmin() && ['accesos', 'Registro de accesos'],
   ].filter(Boolean);
   $('#ficha-pestanas').innerHTML = pestanas.map(([k, t]) =>
     `<button data-pestana="${k}" class="${APP.ficha.pestana === k ? 'activa' : ''}">${t}</button>`).join('');
@@ -1089,6 +1116,7 @@ async function pintarFicha() {
   if (APP.ficha.pestana === 'historia') {
     const consultas = await BD.listarConsultas(p.id);
     APP.ficha.consultas = consultas;
+    BD.registrarAcceso('ver', 'consultas', p.id, { consultas: consultas.length });
     cont.innerHTML = consultas.length
       ? `<div class="linea-tiempo">${consultas.map(tarjetaConsulta).join('')}</div>`
       : vacio('El paciente todavía no tiene consultas registradas.');
@@ -1106,6 +1134,12 @@ async function pintarFicha() {
         <td>${badgeEstado(t.estado)}</td><td class="num">${dinero(t.precio)}</td>
         <td><div class="acciones">${botonesTurno(t, { conFicha: false })}</div></td>
       </tr>`).join('')}</tbody></table></div>` : vacio('El paciente no tiene turnos.');
+  }
+
+  if (APP.ficha.pestana === 'accesos') {
+    const { filas } = await BD.listarAuditoria({ pacienteId: p.id, porPagina: 100 });
+    cont.innerHTML = `<p class="ayuda" style="margin:0 0 12px">Quién consultó, imprimió o modificó información de este paciente (últimos 100 registros).</p>
+      <div class="tabla-wrap">${tablaAuditoria(filas, { conPaciente: false })}</div>`;
   }
 
   if (APP.ficha.pestana === 'datos') {
@@ -1286,6 +1320,7 @@ function modalConsulta({ paciente, consulta = null, turno = null, alGuardar }) {
 }
 
 function imprimirReceta(p, c, r) {
+  BD.registrarAcceso('imprimir', 'recetas', p.id, { receta_id: r.id, consulta_id: c.id });
   const cfg = APP.config || {};
   const prof = c.profesionales || {};
   const w = window.open('', '_blank', 'width=800,height=900');
@@ -1759,8 +1794,8 @@ function modalNuevoUsuario() {
       ${camposUsuario()}
       <div class="campo"><label>Email <span class="req">*</span></label><input type="email" name="email" required autocomplete="off"></div>
       <div class="fila-2">
-        <div class="campo"><label>Contraseña <span class="req">*</span></label><input type="password" name="password" required minlength="6" autocomplete="new-password"></div>
-        <div class="campo"><label>Repetir contraseña <span class="req">*</span></label><input type="password" name="password2" required minlength="6" autocomplete="new-password"></div>
+        <div class="campo"><label>Contraseña <span class="req">*</span></label><input type="password" name="password" required minlength="8" autocomplete="new-password"></div>
+        <div class="campo"><label>Repetir contraseña <span class="req">*</span></label><input type="password" name="password2" required minlength="8" autocomplete="new-password"></div>
       </div>
       <div class="ayuda">El usuario podrá ingresar inmediatamente con este email y contraseña.</div>`,
     alAbrir: enlazarRolUsuario,
@@ -1799,8 +1834,8 @@ async function accionUsuario(e) {
     abrirModal({
       titulo: `Cambiar contraseña · ${u.email}`, tam: 'chico',
       cuerpo: `
-        <div class="campo"><label>Nueva contraseña</label><input type="password" name="password" required minlength="6" autocomplete="new-password"></div>
-        <div class="campo"><label>Repetir contraseña</label><input type="password" name="password2" required minlength="6" autocomplete="new-password"></div>`,
+        <div class="campo"><label>Nueva contraseña</label><input type="password" name="password" required minlength="8" autocomplete="new-password"></div>
+        <div class="campo"><label>Repetir contraseña</label><input type="password" name="password2" required minlength="8" autocomplete="new-password"></div>`,
       onGuardar: async (d) => {
         if (d.password !== d.password2) throw new Error('Las contraseñas no coinciden.');
         await BD.cambiarPasswordUsuario(u.id, d.password);
@@ -1814,8 +1849,8 @@ function modalMiPassword() {
   abrirModal({
     titulo: 'Cambiar mi contraseña', tam: 'chico',
     cuerpo: `
-      <div class="campo"><label>Nueva contraseña</label><input type="password" name="password" required minlength="6" autocomplete="new-password"></div>
-      <div class="campo"><label>Repetir contraseña</label><input type="password" name="password2" required minlength="6" autocomplete="new-password"></div>`,
+      <div class="campo"><label>Nueva contraseña</label><input type="password" name="password" required minlength="8" autocomplete="new-password"></div>
+      <div class="campo"><label>Repetir contraseña</label><input type="password" name="password2" required minlength="8" autocomplete="new-password"></div>`,
     onGuardar: async (d) => {
       if (d.password !== d.password2) throw new Error('Las contraseñas no coinciden.');
       await BD.cambiarMiPassword(d.password);
@@ -1929,7 +1964,12 @@ async function iniciarLlamador() {
   APP.config = await BD.obtenerConfiguracion();
   aplicarMarcaLlamador();
 
-  const sesion = await BD.sesionActual();
+  const sesion = await verificarSesionDeNavegador();
+  supabaseClient.auth.onAuthStateChange((evento) => {
+    if (evento === 'SIGNED_OUT') mostrarAvisoLlamador(`<h2>La sesión se cerró</h2>
+      <p>Ingresá nuevamente al sistema en esta computadora y volvé a abrir el llamador.</p>
+      <a class="btn" href="index.html">Ir al sistema</a>`);
+  });
   if (!sesion) {
     return mostrarAvisoLlamador(`
       <h2>Iniciá sesión primero</h2>
@@ -1984,6 +2024,9 @@ async function iniciarLlamador() {
     BD.escucharLlamados(recibirLlamado);
   } catch (e) { console.warn('Realtime no disponible', e); }
   setInterval(buscarLlamadosNuevos, 4000);
+
+  // la pantalla de la sala (con voz) cuenta como uso activo: evita que se cierre la sesión por inactividad
+  setInterval(() => { if (LLAMADOR.sonido) registrarActividad(true); }, 60000);
 }
 
 function aplicarMarcaLlamador() {
@@ -2136,4 +2179,227 @@ function anunciar(ll, veces = 1) {
     }
     setTimeout(resolver, 15000); // por si el navegador no avisa el final
   });
+}
+
+// ---------------------------------------------------------------------
+// 17. SEGURIDAD DE LA SESIÓN
+//     - La sesión termina al cerrar el navegador (cookie de sesión).
+//     - Se cierra sola tras un tiempo sin uso, con aviso previo.
+//     - Al salir se borra todo y la página se recarga limpia.
+// ---------------------------------------------------------------------
+const SEGURIDAD = {
+  MINUTOS_INACTIVIDAD: 20,          // cierre automático tras este tiempo sin uso
+  SEGUNDOS_AVISO: 60,               // aviso antes del cierre
+  COOKIE: 'optica_sesion',          // marca que vive solo mientras el navegador está abierto
+  CLAVE_ACTIVIDAD: 'optica-actividad',
+  ultimaActividad: Date.now(),
+  ultimaEscritura: 0,
+};
+
+const esArchivoLocal = () => location.protocol === 'file:';
+
+// La cookie sin fecha de vencimiento se borra al cerrar el navegador
+function marcarSesionNavegador() {
+  if (esArchivoLocal()) return;
+  document.cookie = `${SEGURIDAD.COOKIE}=1; path=/; SameSite=Strict${location.protocol === 'https:' ? '; Secure' : ''}`;
+}
+function borrarMarcaSesion() {
+  document.cookie = `${SEGURIDAD.COOKIE}=; path=/; max-age=0; SameSite=Strict`;
+}
+function navegadorConSesion() {
+  if (esArchivoLocal()) return true;   // abierto con doble clic: las cookies no funcionan en file://
+  return document.cookie.split(';').some((c) => c.trim().startsWith(SEGURIDAD.COOKIE + '='));
+}
+
+// Si hay una sesión guardada pero el navegador se cerró desde entonces, se descarta
+async function verificarSesionDeNavegador() {
+  const sesion = await BD.sesionActual();
+  if (sesion && !navegadorConSesion()) {
+    await BD.logout();
+    return null;
+  }
+  return sesion;
+}
+
+// La última actividad se comparte entre pestañas (usar el sistema en una mantiene viva la otra)
+function registrarActividad(forzar = false) {
+  const ahora = Date.now();
+  SEGURIDAD.ultimaActividad = ahora;
+  if (forzar || ahora - SEGURIDAD.ultimaEscritura > 10000) {
+    SEGURIDAD.ultimaEscritura = ahora;
+    try { localStorage.setItem(SEGURIDAD.CLAVE_ACTIVIDAD, String(ahora)); } catch { /* sin almacenamiento */ }
+  }
+}
+function ultimaActividad() {
+  let guardada = 0;
+  try { guardada = Number(localStorage.getItem(SEGURIDAD.CLAVE_ACTIVIDAD)) || 0; } catch { /* nada */ }
+  return Math.max(SEGURIDAD.ultimaActividad, guardada);
+}
+function inactivoDemasiado() {
+  let guardada = 0;
+  try { guardada = Number(localStorage.getItem(SEGURIDAD.CLAVE_ACTIVIDAD)) || 0; } catch { /* nada */ }
+  return guardada > 0 && Date.now() - guardada > SEGURIDAD.MINUTOS_INACTIVIDAD * 60000;
+}
+
+function iniciarControlInactividad() {
+  ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart', 'scroll'].forEach((ev) =>
+    document.addEventListener(ev, () => registrarActividad(), { passive: true, capture: true }));
+  setInterval(revisarInactividad, 5000);
+}
+
+function revisarInactividad() {
+  if (!APP.perfil) return;
+  const limite = SEGURIDAD.MINUTOS_INACTIVIDAD * 60000;
+  const restante = limite - (Date.now() - ultimaActividad());
+  if (restante <= 0) return cerrarSesion('inactividad');
+  let aviso = $('#aviso-inactividad');
+  if (restante <= SEGURIDAD.SEGUNDOS_AVISO * 1000) {
+    if (!aviso) {
+      aviso = document.createElement('div');
+      aviso.id = 'aviso-inactividad';
+      aviso.className = 'aviso-inactividad';
+      document.body.appendChild(aviso);
+    }
+    aviso.innerHTML = `${icono('reloj')} <span>Por seguridad, tu sesión se cerrará en <b>${Math.ceil(restante / 1000)} s</b> por inactividad.</span>
+      <button class="btn btn-chico" type="button">Seguir trabajando</button>`;
+  } else if (aviso) {
+    aviso.remove();
+  }
+}
+
+// Cierra la sesión, borra lo guardado en el navegador y recarga la página limpia
+async function cerrarSesion(motivo) {
+  APP.perfil = null;
+  await BD.logout();
+  borrarMarcaSesion();
+  try { localStorage.removeItem(SEGURIDAD.CLAVE_ACTIVIDAD); sessionStorage.clear(); } catch { /* nada */ }
+  location.replace(location.pathname + (motivo ? `?motivo=${motivo}` : ''));
+}
+
+// ---------------------------------------------------------------------
+// 18. AUDITORÍA (solo administradores)
+// ---------------------------------------------------------------------
+APP.auditoria = { pagina: 0, porPagina: 50, filas: [] };
+
+const TABLAS_AUDITORIA = {
+  pacientes: 'Paciente', consultas: 'Historia clínica', recetas: 'Receta', turnos: 'Turno',
+  tarifas: 'Tarifa', profesionales: 'Profesional', practicas: 'Práctica', perfiles: 'Usuario',
+  configuracion: 'Configuración', reportes: 'Reportes', auditoria: 'Auditoría',
+};
+const ACCIONES_AUDITORIA = {
+  crear: ['Creó', 'activo'], modificar: ['Modificó', 'confirmado'], eliminar: ['Eliminó', 'ausente'],
+  ver: ['Consultó', 'neutro'], imprimir: ['Imprimió', 'pendiente'], exportar: ['Exportó', 'en_espera'],
+};
+const CAMPOS_RESUMEN = ['apellido', 'nombre', 'dni', 'fecha', 'hora', 'estado', 'motivo', 'diagnostico',
+  'precio', 'vigente_desde', 'email', 'rol', 'codigo', 'tipo', 'archivo', 'filas', 'consultas'];
+
+const textoCampo = (k) => k.replace(/_/g, ' ');
+function valorAuditoria(v) {
+  if (v === null || v === undefined || v === '') return '—';
+  const t = typeof v === 'object' ? JSON.stringify(v) : String(v);
+  return t.length > 40 ? t.slice(0, 40) + '…' : t;
+}
+
+// Resumen legible de lo que cambió
+function resumenAuditoria(f) {
+  const d = f.detalle || {};
+  if (f.accion === 'modificar') {
+    const cambios = Object.entries(d);
+    const txt = cambios.slice(0, 3).map(([k, [a, b]]) =>
+      `<b>${esc(textoCampo(k))}</b>: ${esc(valorAuditoria(a))} → ${esc(valorAuditoria(b))}`).join('<br>');
+    return txt + (cambios.length > 3 ? `<br><span class="c-suave">y ${cambios.length - 3} cambio(s) más</span>` : '');
+  }
+  const partes = CAMPOS_RESUMEN.filter((k) => d[k] !== undefined && d[k] !== null && d[k] !== '')
+    .slice(0, 4).map((k) => `${esc(textoCampo(k))}: ${esc(valorAuditoria(d[k]))}`);
+  return partes.join(' · ') || '<span class="c-suave">—</span>';
+}
+
+function tablaAuditoria(filas, { conPaciente = true } = {}) {
+  if (!filas.length) return vacio('No hay registros para los filtros elegidos.');
+  return `<table class="tabla tabla-auditoria"><thead><tr>
+      <th>Fecha y hora</th><th>Usuario</th><th>Acción</th><th>Sobre</th>${conPaciente ? '<th>Paciente</th>' : ''}<th>Detalle</th><th></th>
+    </tr></thead><tbody>
+    ${filas.map((f) => {
+      const [texto, clase] = ACCIONES_AUDITORIA[f.accion] || [f.accion, 'neutro'];
+      return `<tr>
+        <td class="nowrap">${fmtFechaHora(f.created_at)}</td>
+        <td>${f.usuario_email ? esc(f.usuario_email) : '<span class="c-suave">Sistema</span>'}
+            ${f.usuario_rol ? `<span class="sub">${esc(ROLES[f.usuario_rol] || f.usuario_rol)}${f.ip ? ' · ' + esc(f.ip) : ''}</span>` : ''}</td>
+        <td><span class="badge badge-${clase}">${esc(texto)}</span></td>
+        <td class="nowrap">${esc(TABLAS_AUDITORIA[f.tabla] || f.tabla)}${f.registro_id && f.registro_id.length < 12 ? ` <span class="c-suave">#${esc(f.registro_id)}</span>` : ''}</td>
+        ${conPaciente ? `<td>${f.paciente_id ? `<a href="#paciente/${f.paciente_id}">${esc(f.paciente || '#' + f.paciente_id)}</a>` : '<span class="c-suave">—</span>'}</td>` : ''}
+        <td class="detalle-aud">${resumenAuditoria(f)}</td>
+        <td>${f.detalle ? `<button class="btn btn-icono" data-ver-detalle="${f.id}" title="Ver detalle completo">${icono('ver')}</button>` : ''}</td>
+      </tr>`;
+    }).join('')}</tbody></table>`;
+}
+
+async function cargarAuditoria() {
+  const sel = $('#aud-usuario');
+  if (!sel.dataset.cargado) {
+    const usuarios = await BD.listarUsuarios();
+    sel.innerHTML = opciones(usuarios.map((u) => ({ valor: u.id, texto: `${u.nombre} ${u.apellido} (${u.email})` })), '', { vacioTexto: 'Todos los usuarios' });
+    $('#aud-tabla-filtro').innerHTML = opciones(Object.entries(TABLAS_AUDITORIA).map(([k, t]) => ({ valor: k, texto: t })), '', { vacioTexto: 'Todo' });
+    $('#aud-accion').innerHTML = opciones(Object.entries(ACCIONES_AUDITORIA).map(([k, [t]]) => ({ valor: k, texto: t })), '', { vacioTexto: 'Todas' });
+    $('#aud-desde').value = sumarDias(hoy(), -7);
+    $('#aud-hasta').value = hoy();
+    sel.dataset.cargado = '1';
+  }
+  const a = APP.auditoria;
+  $('#aud-tabla').innerHTML = cargando();
+  const { filas, total } = await BD.listarAuditoria({ ...filtrosAuditoria(), pagina: a.pagina, porPagina: a.porPagina });
+  a.filas = filas;
+  $('#aud-total').textContent = `${numero(total)} registro${total === 1 ? '' : 's'}`;
+  $('#aud-tabla').innerHTML = tablaAuditoria(filas);
+  const paginas = Math.max(1, Math.ceil(total / a.porPagina));
+  $('#aud-paginacion').innerHTML = `
+    <span>Página ${a.pagina + 1} de ${paginas}</span>
+    <div class="acciones">
+      <button class="btn btn-sec btn-chico" data-pagina="${a.pagina - 1}" ${a.pagina === 0 ? 'disabled' : ''}>‹ Anterior</button>
+      <button class="btn btn-sec btn-chico" data-pagina="${a.pagina + 1}" ${a.pagina + 1 >= paginas ? 'disabled' : ''}>Siguiente ›</button>
+    </div>`;
+}
+
+function filtrosAuditoria() {
+  return {
+    desde: $('#aud-desde').value || null,
+    hasta: $('#aud-hasta').value || null,
+    usuarioId: $('#aud-usuario').value || null,
+    accion: $('#aud-accion').value || null,
+    tabla: $('#aud-tabla-filtro').value || null,
+  };
+}
+
+function verDetalleAuditoria(id) {
+  const f = APP.auditoria.filas.find((x) => x.id === id);
+  if (!f) return;
+  const d = f.detalle || {};
+  const filas = f.accion === 'modificar'
+    ? Object.entries(d).map(([k, [a, b]]) => `<tr><td><b>${esc(textoCampo(k))}</b></td><td>${esc(valorCompleto(a))}</td><td>${esc(valorCompleto(b))}</td></tr>`).join('')
+    : Object.entries(d).map(([k, v]) => `<tr><td><b>${esc(textoCampo(k))}</b></td><td colspan="2">${esc(valorCompleto(v))}</td></tr>`).join('');
+  abrirModal({
+    titulo: `${(ACCIONES_AUDITORIA[f.accion] || [f.accion])[0]} · ${TABLAS_AUDITORIA[f.tabla] || f.tabla}`,
+    tam: 'ancho', soloLectura: true,
+    cuerpo: `<p class="ayuda" style="margin:0 0 12px">${fmtFechaHora(f.created_at)} · ${esc(f.usuario_email || 'Sistema')}${f.paciente ? ' · Paciente: ' + esc(f.paciente) : ''}</p>
+      <div class="tabla-wrap"><table class="tabla"><thead><tr><th>Campo</th>${f.accion === 'modificar' ? '<th>Antes</th><th>Después</th>' : '<th colspan="2">Valor</th>'}</tr></thead>
+      <tbody>${filas}</tbody></table></div>`,
+  });
+}
+const valorCompleto = (v) => (v === null || v === undefined || v === '') ? '—' : (typeof v === 'object' ? JSON.stringify(v) : String(v));
+
+async function exportarAuditoria() {
+  try {
+    let pagina = 0, todas = [];
+    while (pagina < 20) {   // hasta 20.000 registros por exportación
+      const { filas } = await BD.listarAuditoria({ ...filtrosAuditoria(), pagina, porPagina: 1000 });
+      todas = todas.concat(filas);
+      if (filas.length < 1000) break;
+      pagina++;
+    }
+    exportarCSV(`auditoria_${hoy()}.csv`,
+      ['Fecha y hora', 'Usuario', 'Rol', 'Acción', 'Sobre', 'Registro', 'Paciente', 'Detalle', 'IP'],
+      todas.map((f) => [fmtFechaHora(f.created_at), f.usuario_email || 'Sistema', ROLES[f.usuario_rol] || '',
+        (ACCIONES_AUDITORIA[f.accion] || [f.accion])[0], TABLAS_AUDITORIA[f.tabla] || f.tabla, f.registro_id || '',
+        f.paciente || '', f.detalle ? JSON.stringify(f.detalle) : '', f.ip || '']));
+  } catch (e) { avisoError(e); }
 }

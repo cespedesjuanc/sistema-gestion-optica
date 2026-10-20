@@ -60,7 +60,10 @@ const BD = (() => {
     if (error) throw traducirError(error);
     return data;
   }
-  async function logout() { await sb.auth.signOut(); }
+  // Cierra la sesión solo en este navegador (no afecta otras computadoras)
+  async function logout() {
+    try { await sb.auth.signOut({ scope: 'local' }); } catch { /* sin conexión: igual se borra localmente */ }
+  }
   async function sesionActual() {
     const { data } = await sb.auth.getSession();
     return data.session;
@@ -280,6 +283,31 @@ const BD = (() => {
   }
 
   // ================================================================
+  //  AUDITORÍA
+  // ================================================================
+  // Registra que el usuario vio, imprimió o exportó información (no bloquea la pantalla)
+  function registrarAcceso(accion, tabla, pacienteId = null, detalle = null) {
+    sb.rpc('registrar_acceso', { p_accion: accion, p_tabla: tabla, p_paciente: pacienteId, p_detalle: detalle })
+      .then(({ error }) => { if (error) console.warn('Auditoría:', error.message); });
+  }
+
+  // Registros de auditoría con filtros (solo administradores)
+  async function listarAuditoria({ desde, hasta, accion, tabla, usuarioId, pacienteId, pagina = 0, porPagina = 50 } = {}) {
+    let c = sb.from('auditoria').select('*', { count: 'exact' })
+      .order('id', { ascending: false })
+      .range(pagina * porPagina, pagina * porPagina + porPagina - 1);
+    if (desde) c = c.gte('created_at', new Date(desde + 'T00:00').toISOString());
+    if (hasta) c = c.lte('created_at', new Date(hasta + 'T23:59:59').toISOString());
+    if (accion) c = c.eq('accion', accion);
+    if (tabla) c = c.eq('tabla', tabla);
+    if (usuarioId) c = c.eq('usuario_id', usuarioId);
+    if (pacienteId) c = c.eq('paciente_id', pacienteId);
+    const { data, error, count } = await c;
+    if (error) throw traducirError(error);
+    return { filas: data, total: count };
+  }
+
+  // ================================================================
   //  REPORTES Y TABLERO
   // ================================================================
 
@@ -443,5 +471,6 @@ const BD = (() => {
     listarTurnos, turnosDePaciente, turnosDisponibles, guardarTurno, cambiarEstadoTurno, eliminarTurno,
     marcarLlegada, llamarPaciente, definirConsultorio, llamadosDeHoy, escucharLlamados,
     resumenInicio, reporteGeneral,
+    registrarAcceso, listarAuditoria,
   };
 })();

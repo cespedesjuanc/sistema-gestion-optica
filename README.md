@@ -38,5 +38,13 @@ Proyecto profesionalizante — Ciencia de Datos, ISFT N° 244 Marcos Paz.
 
 Cada ventana del llamador puede estar **con voz** (TV de la sala) o **solo mostrar** (PCs de recepción y consultorios).
 
+## Seguridad
+- **RLS** (seguridad por filas) en todas las tablas: cada rol solo accede a lo que le corresponde.
+- Los usuarios solo los crea un administrador; un registro externo queda desactivado y sin permisos.
+- El navegador no guarda en caché las respuestas con datos; la sesión termina al cerrar el navegador
+  y se cierra sola tras 20 minutos sin uso.
+- **Auditoría** inmutable: quién crea, modifica, elimina, consulta, imprime o exporta información y cuándo
+  (pantalla *Auditoría* y pestaña *Registro de accesos* en la ficha del paciente, solo administradores).
+
 ## Integración con WhatsApp (n8n)
 La base incluye `turnos_disponibles(profesional, fecha)` y `solicitar_turno(...)` para recibir pedidos de turno desde un flujo de n8n.

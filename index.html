@@ -262,6 +262,30 @@
           </div>
         </section>
 
+        <!-- ===================== AUDITORÍA ===================== -->
+        <section class="vista" id="vista-auditoria">
+          <div class="barra">
+            <div class="campo"><label for="aud-desde">Desde</label><input type="date" id="aud-desde"></div>
+            <div class="campo"><label for="aud-hasta">Hasta</label><input type="date" id="aud-hasta"></div>
+            <div class="campo"><label for="aud-usuario">Usuario</label><select id="aud-usuario" style="min-width:220px"></select></div>
+            <div class="campo"><label for="aud-accion">Acción</label><select id="aud-accion"></select></div>
+            <div class="campo"><label for="aud-tabla-filtro">Sobre</label><select id="aud-tabla-filtro"></select></div>
+            <button class="btn" id="aud-buscar">Buscar</button>
+            <div class="espacio"></div>
+            <button class="btn btn-sec" id="aud-exportar"></button>
+          </div>
+          <div class="tarjeta">
+            <div class="tarjeta-cab"><h3>Registro de auditoría</h3><div class="espacio"></div><span class="c-suave" id="aud-total"></span></div>
+            <div class="tarjeta-cuerpo sin-padding tabla-wrap" id="aud-tabla"></div>
+            <div class="paginacion" id="aud-paginacion"></div>
+          </div>
+          <div class="nota">
+            El sistema registra automáticamente quién <b>crea, modifica o elimina</b> pacientes, turnos, consultas, recetas,
+            tarifas, profesionales, prácticas, usuarios y configuración, y quién <b>consulta</b> fichas e historias clínicas,
+            <b>imprime</b> recetas o <b>exporta</b> reportes. Estos registros no se pueden modificar ni borrar desde el sistema.
+          </div>
+        </section>
+
         <!-- ===================== CONFIGURACIÓN ===================== -->
         <section class="vista" id="vista-configuracion">
           <div class="grilla g-2-1">

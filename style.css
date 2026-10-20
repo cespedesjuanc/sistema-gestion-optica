@@ -644,3 +644,17 @@ body.llamador {
   .ll-cuerpo { grid-template-columns: minmax(0, 1fr); }
   .ll-actual { min-height: 50vh; }
 }
+
+/* =====================================================================
+   SEGURIDAD Y AUDITORÍA
+   ===================================================================== */
+.aviso-inactividad {
+  position: fixed; left: 50%; top: 16px; transform: translateX(-50%); z-index: 300;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: center;
+  background: var(--sidebar); color: #fff; border-left: 4px solid var(--ambar);
+  border-radius: var(--radio); padding: 10px 16px; box-shadow: var(--sombra-alta); font-size: 14px;
+  max-width: calc(100% - 32px);
+}
+.aviso-inactividad .icono { color: var(--ambar); }
+.tabla-auditoria td { vertical-align: top; }
+.tabla-auditoria .detalle-aud { font-size: 12.5px; line-height: 1.5; max-width: 420px; word-break: break-word; }
